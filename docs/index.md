@@ -4,7 +4,7 @@ title: ""
 image: assets/BC_Logo_.png
 ---
 
-## What is braidpool
+## Introduction
 
 Braidpool is a peer to peer bitcoin mining pool that aims to:
 
@@ -14,6 +14,9 @@ Braidpool is a peer to peer bitcoin mining pool that aims to:
 3. Payouts in a constant size blockspace.
 4. Provide tools for enabling a hashrate futures market.
 
+
+<hr />
+<br />
 
 ## TLA+ Specifications
 
@@ -30,3 +33,6 @@ early. The current list of protocols we have specified are:
    public key for coinbase payout to simply be the concatenation of
    the miner id.
 1. The above spec for block generation uses the [Bitcoin Transactions]({{ site.baseurl }}{% link /specifications/Bitcoin.pdf%}) spec. The transaction spec uses a simple scriptSig = scriptPubkey check.
+
+<hr />
+<br />

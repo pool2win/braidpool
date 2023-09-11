@@ -15,8 +15,7 @@ List of specifications in TLA+:
    distributed key generation algorithm is run - instead we replace the
    public key for coinbase payout to simply be the concatenation of
    the miner id.
-1. The above spec for block generation uses the [Bitcoin Transactions]({{ site.baseurl }}{% link /specifications/Bitcoin.pdf%}) spec.
-   The transaction spec uses a simple scriptSig = scriptPubkey check.
+1. The above spec for block generation uses the [Bitcoin Transactions]({{ site.baseurl }}{% link /specifications/Bitcoin.pdf%}) spec. The transaction spec uses a simple scriptSig = scriptPubkey check.
 
 
 List of protocols still to be specified:

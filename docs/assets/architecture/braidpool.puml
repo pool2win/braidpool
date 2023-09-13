@@ -1,0 +1,26 @@
+@startuml braidpool_context
+
+!include C4_Container.puml
+!include C4_Context.puml
+
+LAYOUT_WITH_LEGEND()
+
+Person(miningFacility, "Mining Facility", "A miner operation with ASICs")
+Person(minerAdmin, "Miner Admin Console", "Admin console for the miner to read data and to create payouts")
+
+System_Boundary("deployment", "On site or on cloud") {
+	
+	Container(braidpoolNode, "Braidpool Node", "Rust", "Provides stratum interface to distribute work and receive results. These results are then broadcast to the braidpool p2p network")
+
+	System(bitcoind, "Bitcoin node", "Bitcoin node for receiving new blocks and broadcasting blocks found by braidpool")
+}
+
+
+Rel(miningFacility, braidpoolNode, "Send weak blocks", "stratum")
+Rel(braidpoolNode, miningFacility, "Received new work", "stratum")
+
+Rel(bitcoind, braidpoolNode, "Announce new blocks", "bitcoin rpc")
+Rel(braidpoolNode, bitcoind, "getblocktemplate for building new blocks. Announce new blocks", "bitcoin rpc")
+
+Rel(minerAdmin, braidpoolNode, "query braidpool data / request payouts", "RPC")
+@enduml

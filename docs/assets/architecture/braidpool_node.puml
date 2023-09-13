@@ -7,86 +7,86 @@
 
 LAYOUT_WITH_LEGEND()
 
-System(miningFacility, "Miner hardware", "ASICs")
-System(minerAdmin, "Miner Admin Console", "Miner accessing braidpool data and collecting payouts etc")
+System_Ext(miningFacility, "Miner hardware", "ASICs")
+System_Ext(minerAdmin, "Miner Admin Console", "Miner accessing braidpool data and collecting payouts etc")
 
-Lay_D(miningFacility, minerAdmin)
+/'
+ ' Lay_D(miningFacility, minerAdmin)
+ '/
 
 
-System(bitcoind, "Bitcoin node", "Bitcoin node for receiving new blocks and broadcasting blocks found by braidpool")
+System_Ext(bitcoind, "Bitcoin node", "Bitcoin node for receiving new blocks and broadcasting blocks found by braidpool")
 
 System_Ext(braidpool, "Braidpool network", "Other braidpool nodes on the p2p network")
 
-Container_Boundary("node", "Braidpool node") {
 	
-	Component(gossipBroadcast, "Gossip Broadcast", "Rust/Tokio", "Gossip based p2p broadcast for sharing weak blocks, DKG, TSS and other messages")
+Component(gossipBroadcast, "Gossip Broadcast", "Rust/Tokio", "Gossip based p2p broadcast for sharing weak blocks, DKG, TSS and other messages")
 
-	Component(messageDAG, "Message DAG", "Rust/Tokio", "Captures 'happens before' relationships between messages. Each message sent by a node links to last seen message from other nodes. Weak blocks are inserted only by Work Validator")
+Component(messageDAG, "Message DAG", "Rust/Tokio", "Captures 'happens before' relationships between messages. Each message sent by a node links to last seen message from other nodes. Weak blocks are inserted only by Work Validator")
 
-	Component(reliableBroadcast, "Reliable P2P Broadcast", "Rust/Tokio", "Provides reliable  broadcast by implementing nack/anti-entropy protocols. The messages to nack for are discovered from the DAG.")
+Component(reliableBroadcast, "Reliable P2P Broadcast", "Rust/Tokio", "Provides reliable  broadcast by implementing nack/anti-entropy protocols. The messages to nack for are discovered from the DAG.")
 
-	Component(blockBuilder, "Block Builder", "rust-bitcoin", "Build blocks to start mining on. Other miners validate the block before accepting weak blocks for it")	
+Component(blockBuilder, "Block Builder", "rust-bitcoin", "Build blocks to start mining on. Other miners validate the block before accepting weak blocks for it")	
 
-	Component(workValidtor, "Work Validator", "Rust", "Validate each receieved weak block against the work block announced by miner")
+Component(workValidtor, "Work Validator", "Rust", "Validate each receieved weak block against the work block announced by miner")
 
-	Component(stratum, "Stratum proxy", "stratum v1/v2", "Proxy between braidpool and ASICs")
+Component(stratum, "Stratum proxy", "stratum v1/v2", "Proxy between braidpool and ASICs")
 
-	Component(bitcoindClient, "Bitcoin Listener", "rust-bitcoin", "Listens for and announces new blocks")
+Component(bitcoindClient, "Bitcoin Listener", "rust-bitcoin", "Listens for and announces new blocks")
 
-	Container(frost, "DKG/TSS", "FROST", "Run DKG and TSS protocols over p2p broadcast")
+Container(frost, "DKG/TSS", "FROST", "Run DKG and TSS protocols over p2p broadcast")
 
-	Container(minerAdminAPI, "Miner Admin API", "RPC", "Handle requests to read braidpool state and issue requests to receive payouts")
+Container(minerAdminAPI, "Miner Admin API", "RPC", "Handle requests to read braidpool state and issue requests to receive payouts")
 
-	Component(txBuilder, "Transaction Builder", "rust-bitcoin", "Build bitcoin transactions")
+Component(txBuilder, "Transaction Builder", "rust-bitcoin", "Build bitcoin transactions")
 
-	Component(accounting, "Accounting", "Rust", "Track miner earnings and payouts")
+Component(accounting, "Accounting", "Rust", "Track miner earnings and payouts")
 
-	Component(storage, "Storage", "sqlite", "Store miner's key material")
-}
+Component(storage, "Storage", "sqlite", "Store miner's key material")
 
 
-Rel(gossipBroadcast, messageDAG, "Insert message")
-Rel(reliableBroadcast, messageDAG, "Get messages to nack for")
-Rel(reliableBroadcast, gossipBroadcast, "Send message")
+Rel(gossipBroadcast, messageDAG, "Inserts message")
+Rel(reliableBroadcast, messageDAG, "Gets nacks")
+Rel(reliableBroadcast, gossipBroadcast, "Sends message")
 
-Rel(blockBuilder, bitcoind, "Call getblocktemplate")
-Rel(blockBuilder, reliableBroadcast, "Announce work block")
+Rel(blockBuilder, bitcoind, "Calls getblocktemplate")
+Rel(blockBuilder, reliableBroadcast, "Announces work block")
 
-Rel(reliableBroadcast, workValidtor, "Validate received weak block")
+Rel(reliableBroadcast, workValidtor, "Validates received weak block")
 
-Rel(workValidtor, messageDAG, "Insert weak blocks")
+Rel(workValidtor, messageDAG, "Inserts weak blocks")
 
-Rel(miningFacility, stratum, "Receive weak blocks")
-Rel(stratum, miningFacility, "Send new work")
-Rel(stratum, reliableBroadcast, "Broadcast weak block")
-Rel(stratum, workValidtor, "Validate weak block from mine")
+Rel(miningFacility, stratum, "Receives weak blocks")
+Rel(stratum, miningFacility, "Sends new work")
+Rel(stratum, reliableBroadcast, "Broadcasts weak block")
+Rel(stratum, workValidtor, "Validates weak block from mine")
 
-Rel(blockBuilder, stratum, "Send new work")
+Rel(blockBuilder, stratum, "Sends new work")
 
-Rel(stratum, blockBuilder, "New block found")
-Rel(stratum, bitcoind, "New block found")
+Rel(stratum, blockBuilder, "Signals new block found")
+Rel(stratum, bitcoind, "Signals new block found")
 
-Rel(bitcoind, bitcoindClient, "New block found")
-Rel(bitcoindClient, blockBuilder, "Build new block")
-Rel(bitcoindClient, frost, "Start new DKG/TSS execution")
+Rel(bitcoind, bitcoindClient, "Signals new block found")
+Rel(bitcoindClient, blockBuilder, "Builds new block")
+Rel(bitcoindClient, frost, "Starts new DKG/TSS")
 
-Rel(frost, reliableBroadcast, "Send/Receive DKG/TSS messages")
-Rel(frost, blockBuilder, "Update keys and sigs")
+Rel(frost, reliableBroadcast, "Sends/Receives messages")
+Rel(frost, blockBuilder, "Updates keys and sigs")
 
-Rel(gossipBroadcast, braidpool, "Send/Receive messages")
+Rel(gossipBroadcast, braidpool, "Sends/Receives messages")
 
-Rel(minerAdminAPI, txBuilder, "Build miner payout tx")
+Rel(minerAdminAPI, txBuilder, "Builds miner payout tx")
 
-Rel(accounting, messageDAG, "Query DAG")
-Rel(blockBuilder, accounting, "Get earnings for all miners")
-Rel(txBuilder, accounting, "Get miner earnings")
-Rel(blockBuilder, txBuilder, "Build UHPO, coinbase, payout txs")
+Rel(accounting, messageDAG, "Reads")
+Rel(blockBuilder, accounting, "Gets earnings for all miners")
+Rel(txBuilder, accounting, "Gets earnings")
+Rel(blockBuilder, txBuilder, "Builds UHPO, coinbase, payout txs")
 
-Rel(minerAdmin, minerAdminAPI, "Read braidpool data, update keys for payouts")
+Rel(minerAdmin, minerAdminAPI, "Reads data/Updates keys")
 
-Rel(minerAdminAPI, messageDAG, "Read braid data")
+Rel(minerAdminAPI, messageDAG, "Read")
 
-Rel(storage, minerAdminAPI, "Store key material")
-Rel(txBuilder, storage, "Read keys for payout txs")
+Rel(minerAdminAPI, storage, "Stores key material")
+Rel(txBuilder, storage, "Reads keys")
 
 @enduml

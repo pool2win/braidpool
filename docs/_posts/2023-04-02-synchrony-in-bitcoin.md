@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Synchrony in bitcoin"
+title: "Synchrony in Bitcoin"
 image: assets/BC_Logo_.png
 ---
 

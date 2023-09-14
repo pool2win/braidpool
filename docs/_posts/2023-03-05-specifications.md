@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Need for specifications"
+title: "Need for Specifications"
 image: assets/BC_Logo_.png
 ---
 

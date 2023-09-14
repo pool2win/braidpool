@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Generating pool key and blocks to mine"
+title: "Generating Pool Key And Blocks to Mine"
 image: assets/BC_Logo_.png
 ---
 

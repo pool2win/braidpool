@@ -16,17 +16,17 @@ synchronous network mode. The authors are aware of this and leave it
 for the academic community accept their claim that their model is a
 partially synchronous network model.
 
-## SPECTRE Network Model
+The [SPECTRE](https://eprint.iacr.org/2016/1159) Network Model
 
-![SPECTRE Network Model](/assets/spectre-network-model.png).
+![SPECTRE Network Model](/assets/spectre-network-model.png)
 
-## GHOSTDAG Network Model
+The [GHOSTDAG](https://eprint.iacr.org/2018/104.pdf) Network Model
 
-![GhostDAG Network Model](/assets/ghostdag-network-model-1.png).
-![GhostDAG Network Model](/assets/ghostdag-network-model-2.png).
+![GhostDAG Network Model](/assets/ghostdag-network-model-1.png)
+![GhostDAG Network Model](/assets/ghostdag-network-model-2.png)
 
 
-In the implementation they use a [default k of
+In the [implementation they use a default k of
 18](https://github.com/kaspanet/kaspad/blob/bd1420220a1c9f7ab253b2b120240351e9440146/domain/dagconfig/consensus_defaults.go#L38). The
 network message delay is thus obfuscated, but it is still there.
 

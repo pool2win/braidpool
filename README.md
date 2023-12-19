@@ -54,5 +54,3 @@ Matrix chat: [https://matrix.to/#/#braidpool:matrix.org](https://matrix.to/#/#br
 Mailing list: [https://sourceforge.net/p/braidpool/mailman/braidpool-discuss/](https://sourceforge.net/p/braidpool/mailman/braidpool-discuss/)
 
 Development blog: [https://blog.opdup.com/](https://blog.opdup.com/)
-
-Donations: bitcoin:bc1q6xms5xsq6kvk9h57mvsdxdjnnrl0vsc942xlxe

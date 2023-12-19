@@ -4,7 +4,7 @@
 # Proposal
 
 Read the
-[proposal](https://github.com/pool2win/braidpool/raw/main/proposal/proposal.pdf)
+[proposal](https://github.com/pool2win/braidpool/blob/8d0724f9fb191ddbd5e02afa20f847fc0249f128/proposal/proposal.pdf)
 for braidpool.
 
 For details on how delivering shares to market makers for enabling hashrate

@@ -62,24 +62,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn setup_tracing() -> Result<(), Box<dyn Error>> {
-    use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
-    // Configure a `tracing` subscriber that logs traces emitted by the chat
-    // server.
-    tracing_subscriber::fmt()
-        // Filter what traces are displayed based on the RUST_LOG environment
-        // variable.
-        //
-        // Traces emitted by the example code will always be displayed. You
-        // can set `RUST_LOG=tokio=trace` to enable additional traces emitted by
-        // Tokio itself.
-        .with_env_filter(EnvFilter::from_default_env().add_directive("chat=info".parse()?))
-        // Log events when `tracing` spans are created, entered, exited, or
-        // closed. When Tokio's internal tracing support is enabled (as
-        // described above), this can be used to track the lifecycle of spawned
-        // tasks on the Tokio runtime.
-        .with_span_events(FmtSpan::FULL)
-        // Set this subscriber as the default, to collect all traces emitted by
-        // the program.
-        .init();
+    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    tracing::subscriber::set_global_default(subscriber)?;
     Ok(())
 }

@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         log::info!("Starting accept");
         match listener.accept().await {
             Ok((stream, _)) => {
-                log::debug!("\n\naccepted connection");
+                log::debug!("Accepted connection");
                 let (r, w) = stream.into_split();
                 let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
                 let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());

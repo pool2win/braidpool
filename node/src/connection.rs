@@ -46,7 +46,7 @@ impl Connection {
 
     pub async fn start_read_loop(&mut self) -> Result<(), Box<dyn Error>> {
         use futures::StreamExt;
-        log::info!("Start read loop....");
+        log::debug!("Start read loop....");
         loop {
             match self.reader.next().await {
                 None => {

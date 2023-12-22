@@ -2,9 +2,9 @@
 
 cd node
 cargo build
-cargo run -- --bind=localhost:25188 &
+RUST_LOG=debug cargo run -- --bind=localhost:25188 &
 sleep 1
-cargo run -- --bind=localhost:25189 --addnode=localhost:25188 &
+RUST_LOG=debug cargo run -- --bind=localhost:25189 --addnode=localhost:25188 &
 sleep 1
 
 echo

@@ -19,6 +19,15 @@ The goals of the pool are:
    miners on the pool.
 4. Provide building blocks for enabling a futures market of hash rates.
 
+# Developer
+
+To run tests for the braidpool node, use the usual `cargo` test utility.
+
+```
+cd node
+cargo test
+```
+
 # Running the node
 
 For the moment, the node runs a simple p2p broadcast. To run it you need to do

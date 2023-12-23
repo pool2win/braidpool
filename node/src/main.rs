@@ -1,8 +1,6 @@
 use clap::Parser;
 use log;
 use std::error::Error;
-use tokio::net::TcpListener;
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 mod cli;
 mod connection;
@@ -20,35 +18,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if let Some(addpeer) = args.addpeer {
         for peer in addpeer {
-            log::info!("Connecting to peer: {:?}", peer);
             tokio::spawn(async move {
                 connection::connect(peer.as_str()).await;
             });
         }
     }
 
-    log::info!("Binding to {}", args.bind);
-    let listener = TcpListener::bind(&args.bind).await?;
-    loop {
-        // Asynchronously wait for an inbound TcpStream.
-        log::info!("Starting accept");
-        match listener.accept().await {
-            Ok((stream, _)) => {
-                log::debug!("Accepted connection");
-                let (r, w) = stream.into_split();
-                let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
-                let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
-                let mut conn = connection::Connection::new(framed_reader, framed_writer);
-
-                tokio::spawn(async move {
-                    if conn.start_from_accept().await.is_err() {
-                        log::info!("Peer closed connection")
-                    }
-                });
-            }
-            Err(e) => log::error!("Couldn't get client on accept: {:?}", e),
-        }
-    }
+    let _ = connection::start_listen(args.bind).await;
+    Ok(())
 }
 
 fn setup_tracing() -> Result<(), Box<dyn Error>> {

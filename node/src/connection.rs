@@ -3,14 +3,16 @@ use std::{error::Error, net::SocketAddr};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 //use tokio::sync::mpsc;
 use std::net::ToSocketAddrs;
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 // const CHANNEL_CAPACITY: usize = 32;
 
 use crate::protocol::{self, HandshakeMessage, Message, ProtocolMessage};
 
+/// Connect to a peer and start read loop
 pub async fn connect(peer: &str) {
+    log::info!("Connecting to peer: {:?}", peer);
     let stream = TcpStream::connect(peer).await.expect("Error connecting");
     let (r, w) = stream.into_split();
     let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
@@ -21,6 +23,31 @@ pub async fn connect(peer: &str) {
             if conn.start_from_connect(&addr).await.is_err() {
                 log::info!("Peer closed connection");
             }
+        }
+    }
+}
+
+pub async fn start_listen(addr: String) -> Result<(), Box<dyn Error>> {
+    log::info!("Binding to {}", addr);
+    let listener = TcpListener::bind(addr).await?;
+    loop {
+        // Asynchronously wait for an inbound TcpStream.
+        log::info!("Starting accept");
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                log::debug!("Accepted connection");
+                let (r, w) = stream.into_split();
+                let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
+                let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
+                let mut conn = Connection::new(framed_reader, framed_writer);
+
+                tokio::spawn(async move {
+                    if conn.start_from_accept().await.is_err() {
+                        log::info!("Peer closed connection")
+                    }
+                });
+            }
+            Err(e) => log::error!("Couldn't get client on accept: {:?}", e),
         }
     }
 }

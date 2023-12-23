@@ -2,11 +2,28 @@ use bytes::Bytes;
 use std::{error::Error, net::SocketAddr};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 //use tokio::sync::mpsc;
+use std::net::ToSocketAddrs;
+use tokio::net::TcpStream;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 // const CHANNEL_CAPACITY: usize = 32;
 
 use crate::protocol::{self, HandshakeMessage, Message, ProtocolMessage};
+
+pub async fn connect(peer: &str) {
+    let stream = TcpStream::connect(peer).await.expect("Error connecting");
+    let (r, w) = stream.into_split();
+    let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
+    let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
+    let mut conn = Connection::new(framed_reader, framed_writer);
+    if let Ok(addr_iter) = peer.to_socket_addrs() {
+        if let Some(addr) = addr_iter.into_iter().next() {
+            if conn.start_from_connect(&addr).await.is_err() {
+                log::info!("Peer closed connection");
+            }
+        }
+    }
+}
 
 pub struct Connection {
     reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,

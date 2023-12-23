@@ -1,6 +1,8 @@
 
 ![Build status](https://github.com/wholooks/braidpool/actions/workflows/rust-node.yml/badge.svg)
 
+[![codecov](https://codecov.io/github/pool2win/braidpool/graph/badge.svg?token=41YE7WQS5J)](https://codecov.io/github/pool2win/braidpool)
+
 # Proposal
 
 Read the

@@ -28,6 +28,14 @@ cd node
 cargo test
 ```
 
+We are using codecov in the CI workflow. To set codecov locally, you
+will need to install llvm-codecov and then you'll be able to run it.
+
+Installation `cargo +stable install cargo-llvm-cov --locked` or follow
+instructions here: https://github.com/taiki-e/cargo-llvm-cov.
+
+Running test with coverage reports `cargo llvm-code`.
+
 # Running the node
 
 For the moment, the node runs a simple p2p broadcast. To run it you need to do

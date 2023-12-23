@@ -11,8 +11,8 @@ pub struct Cli {
     #[arg(long, default_value = "0.0.0.0:25188")]
     pub bind: String,
 
-    /// Add a node to connect to and attempt to keep the connection open. This option can be
+    /// Add a peer to connect to and attempt to keep the connection open. This option can be
     /// specified multiple times
     #[arg(long)]
-    pub addnode: Option<Vec<String>>,
+    pub addpeer: Option<Vec<String>>,
 }

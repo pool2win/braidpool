@@ -19,15 +19,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     setup_logging()?;
     setup_tracing()?;
 
-    if let Some(addnode) = args.addnode {
-        for node in addnode.iter() {
-            log::info!("Connecting to node: {:?}", node);
-            let stream = TcpStream::connect(node).await.expect("Error connecting");
+    if let Some(addpeer) = args.addpeer {
+        for peer in addpeer.iter() {
+            log::info!("Connecting to peer: {:?}", peer);
+            let stream = TcpStream::connect(peer).await.expect("Error connecting");
             let (r, w) = stream.into_split();
             let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
             let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
             let mut conn = connection::Connection::new(framed_reader, framed_writer);
-            if let Ok(addr_iter) = node.to_socket_addrs() {
+            if let Ok(addr_iter) = peer.to_socket_addrs() {
                 if let Some(addr) = addr_iter.into_iter().next() {
                     tokio::spawn(async move {
                         if conn.start_from_connect(&addr).await.is_err() {

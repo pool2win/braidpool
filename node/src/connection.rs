@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use std::{error::Error, net::SocketAddr};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 //use tokio::sync::mpsc;
+use futures::{SinkExt, StreamExt};
 use std::net::ToSocketAddrs;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -52,32 +52,32 @@ pub async fn start_listen(addr: String) -> Result<(), Box<dyn Error>> {
     }
 }
 
-pub struct Connection {
-    reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-    writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+pub struct Connection<R, W> {
+    reader: R,
+    writer: W,
     //channel_receiver: mpsc::Receiver<String>,
     //channel_sender: mpsc::Sender<String>,
 }
 
-impl Connection {
-    pub fn new(
-        reader: FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
-        writer: FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
-    ) -> Connection {
+impl<R, W> Connection<R, W>
+where
+    R: StreamExt,
+    W: SinkExt<Bytes>,
+{
+    pub fn new(r: R, w: W) -> Self {
         //let (channel_sender, channel_receiver) = mpsc::channel(CHANNEL_CAPACITY);
         Connection {
-            reader,
-            writer,
+            reader: r,
+            writer: w,
             // channel_receiver,
             // channel_sender,
         }
     }
 
     pub async fn start_from_connect(&mut self, addr: &SocketAddr) -> Result<(), Box<dyn Error>> {
-        use futures::SinkExt;
         log::info!("Starting from connect");
         let message = HandshakeMessage::start(addr).unwrap();
-        self.writer.send(message.as_bytes().unwrap()).await?;
+        self.writer.feed(message.as_bytes().unwrap()).await?;
         self.start_read_loop().await?;
         Ok(())
     }
@@ -89,7 +89,6 @@ impl Connection {
     }
 
     pub async fn start_read_loop(&mut self) -> Result<(), Box<dyn Error>> {
-        use futures::StreamExt;
         log::debug!("Start read loop....");
         loop {
             match self.reader.next().await {
@@ -111,14 +110,12 @@ impl Connection {
     }
 
     async fn message_received(&mut self, message: &Bytes) -> Result<(), &'static str> {
-        use futures::SinkExt;
-
         let message: Message = protocol::Message::from_bytes(message).unwrap();
         match message.response_for_received() {
             Ok(result) => {
                 if let Some(response) = result {
                     if let Some(to_send) = response.as_bytes() {
-                        if (self.writer.send(to_send).await).is_err() {
+                        if (self.writer.feed(to_send).await).is_err() {
                             return Err("Send failed: Closing peer connection");
                         }
                     } else {
@@ -131,5 +128,30 @@ impl Connection {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //use super::*;
+
+    use crate::connection::Connection;
+
+    #[tokio::test]
+    async fn it_create_reader_and_writer_from_vector() {
+        // use bytes::Bytes;
+        // use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+
+        // let (r, w) = tokio::io::duplex(64);
+        // let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
+        // let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
+
+        // let msg = Bytes::from("Hello World!");
+        // let _ = framed_writer.feed(msg.clone()).await;
+        // let result = framed_reader.next().await;
+
+        // assert_eq!(&result[..], &msg[..]);
+
+        // Connection::new(framed_reader, framed_writer);
     }
 }

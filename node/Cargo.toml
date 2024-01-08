@@ -20,3 +20,5 @@ sqlite = { version = "0.31.1" }
 clap = { version = "4.4.2", features = ["derive", "string"] }
 log = "0.4.20"
 env_logger = "0.10.1"
+mockall = "0.12.1"
+futures-util = "0.3.30"

@@ -1,7 +1,8 @@
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use std::{error::Error, net::SocketAddr};
 //use tokio::sync::mpsc;
 use futures::{SinkExt, StreamExt};
+use std::marker::Unpin;
 use std::net::ToSocketAddrs;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -61,8 +62,8 @@ pub struct Connection<R, W> {
 
 impl<R, W> Connection<R, W>
 where
-    R: StreamExt,
-    W: SinkExt<Bytes>,
+    R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
+    W: SinkExt<Bytes> + Unpin,
 {
     pub fn new(r: R, w: W) -> Self {
         //let (channel_sender, channel_receiver) = mpsc::channel(CHANNEL_CAPACITY);
@@ -77,7 +78,7 @@ where
     pub async fn start_from_connect(&mut self, addr: &SocketAddr) -> Result<(), Box<dyn Error>> {
         log::info!("Starting from connect");
         let message = HandshakeMessage::start(addr).unwrap();
-        self.writer.feed(message.as_bytes().unwrap()).await?;
+        let _ = self.writer.send(message.as_bytes().unwrap()).await;
         self.start_read_loop().await?;
         Ok(())
     }
@@ -91,20 +92,20 @@ where
     pub async fn start_read_loop(&mut self) -> Result<(), Box<dyn Error>> {
         log::debug!("Start read loop....");
         loop {
-            match self.reader.next().await {
-                None => {
-                    return Err("peer closed connection".into());
-                }
-                Some(item) => match item {
-                    Err(_) => {
-                        return Err("peer closed connection".into());
-                    }
+            let item = self.reader.next().await;
+            if let Some(message) = item {
+                match message {
                     Ok(message) => {
                         if self.message_received(&message.freeze()).await.is_err() {
-                            return Err("peer closed connection".into());
+                            return Err("send: peer closed connection".into());
                         }
                     }
-                },
+                    Err(_) => {
+                        return Err("receive: peer closed connection".into());
+                    }
+                }
+            } else {
+                return Err("receive: peer closed connection".into());
             }
         }
     }
@@ -115,7 +116,7 @@ where
             Ok(result) => {
                 if let Some(response) = result {
                     if let Some(to_send) = response.as_bytes() {
-                        if (self.writer.feed(to_send).await).is_err() {
+                        if (self.writer.send(to_send).await).is_err() {
                             return Err("Send failed: Closing peer connection");
                         }
                     } else {
@@ -147,7 +148,7 @@ mod tests {
         // let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
 
         // let msg = Bytes::from("Hello World!");
-        // let _ = framed_writer.feed(msg.clone()).await;
+        // let _ = framed_writer.send(msg.clone()).await;
         // let result = framed_reader.next().await;
 
         // assert_eq!(&result[..], &msg[..]);

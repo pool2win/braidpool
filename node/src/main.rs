@@ -1,5 +1,4 @@
 use clap::Parser;
-use log;
 use std::error::Error;
 
 mod cli;

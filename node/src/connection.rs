@@ -134,25 +134,25 @@ where
 
 #[cfg(test)]
 mod tests {
-    //use super::*;
-
-    use crate::connection::Connection;
+    use super::*;
+    use bytes::Bytes;
+    use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
     #[tokio::test]
     async fn it_create_reader_and_writer_from_vector() {
-        // use bytes::Bytes;
-        // use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+        let (r, w) = tokio::io::duplex(64);
+        let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
+        let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
 
-        // let (r, w) = tokio::io::duplex(64);
-        // let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
-        // let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
+        let msg = Bytes::from("Hello World!");
+        let _ = framed_writer.send(msg.clone()).await;
+        let result = framed_reader.next().await;
 
-        // let msg = Bytes::from("Hello World!");
-        // let _ = framed_writer.send(msg.clone()).await;
-        // let result = framed_reader.next().await;
+        assert!(result.unwrap().is_ok_and(|rr| rr == msg[..]));
 
-        // assert_eq!(&result[..], &msg[..]);
-
-        // Connection::new(framed_reader, framed_writer);
+        Connection::new(framed_reader, framed_writer);
     }
+
+    #[tokio::test]
+    async fn it_should_create_connection_using_streams_on_vectors() {}
 }

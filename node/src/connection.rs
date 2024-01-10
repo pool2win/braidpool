@@ -101,7 +101,7 @@ where
                         }
                     }
                     Err(_) => {
-                        return Err("receive: peer closed connection".into());
+                        return Err("message receive: peer closed connection".into());
                     }
                 }
             } else {
@@ -110,8 +110,9 @@ where
         }
     }
 
-    async fn message_received(&mut self, message: &Bytes) -> Result<(), &'static str> {
-        let message: Message = protocol::Message::from_bytes(message).unwrap();
+    async fn message_received(&mut self, msg: &Bytes) -> Result<(), &'static str> {
+        let message: Message = protocol::Message::from_bytes(msg).unwrap();
+        log::debug!("{:?}", message);
         match message.response_for_received() {
             Ok(result) => {
                 if let Some(response) = result {
@@ -136,10 +137,12 @@ where
 mod tests {
     use super::*;
     use bytes::Bytes;
+    use futures::stream;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
     #[tokio::test]
-    async fn it_create_reader_and_writer_from_vector() {
+    async fn it_should_create_connection_using_framed_read_and_write_without_errors() {
         let (r, w) = tokio::io::duplex(64);
         let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
         let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
@@ -154,5 +157,91 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_should_create_connection_using_streams_on_vectors() {}
+    async fn it_should_create_connection_using_streams_on_vectors_without_errors() {
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![];
+        let writer: Vec<Bytes> = vec![];
+
+        let reader_iter = stream::iter(reader);
+        Connection::new(reader_iter, writer);
+    }
+
+    #[tokio::test]
+    async fn it_should_write_bytes_to_writer_succesfully() {
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![];
+        let writer: Vec<Bytes> = vec![];
+
+        let reader_iter = stream::iter(reader);
+        let mut connection = Connection::new(reader_iter, writer);
+
+        let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let message = HandshakeMessage::start(addr).unwrap();
+        let msg_bytes = message.as_bytes().unwrap();
+
+        assert!(connection.writer.send(msg_bytes).await.is_ok());
+        assert_eq!(connection.writer.len(), 1);
+        assert_eq!(connection.writer[0], message.as_bytes().unwrap()); // length delimited codec not used by test reader/writer
+    }
+
+    #[tokio::test]
+    async fn it_should_read_bytes_from_reader_succesfully() {
+        let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let message = HandshakeMessage::start(addr).unwrap();
+        let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes)];
+        let writer: Vec<Bytes> = vec![];
+
+        let reader_iter = stream::iter(reader);
+        let mut connection = Connection::new(reader_iter, writer);
+
+        let read_result = connection.reader.next().await;
+        assert!(read_result.is_some());
+        let result = read_result.unwrap().expect("Error reading result");
+        assert_eq!(result, message.as_bytes().unwrap());
+    }
+
+    #[tokio::test]
+    async fn it_should_start_read_loop() {
+        let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let message = HandshakeMessage::start(addr).unwrap();
+        let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes)];
+
+        let writer: Vec<Bytes> = vec![];
+
+        let reader_iter = stream::iter(reader);
+        let mut connection = Connection::new(reader_iter, writer);
+
+        assert!(connection.start_read_loop().await.is_err()); // reading from limited vec results in None in the end
+    }
+
+    #[tokio::test]
+    async fn it_should_start_from_connect() {
+        let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let message = HandshakeMessage::start(addr).unwrap();
+        let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes)];
+
+        let writer: Vec<Bytes> = vec![];
+
+        let reader_iter = stream::iter(reader);
+        let mut connection = Connection::new(reader_iter, writer);
+
+        assert!(connection.start_from_connect(addr).await.is_err()); // reading from limited vec results in None in the end
+    }
+
+    #[tokio::test]
+    async fn it_should_start_from_accept() {
+        let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let message = HandshakeMessage::start(addr).unwrap();
+        let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes)];
+
+        let writer: Vec<Bytes> = vec![];
+
+        let reader_iter = stream::iter(reader);
+        let mut connection = Connection::new(reader_iter, writer);
+
+        assert!(connection.start_from_accept().await.is_err()); // reading from limited vec results in None in the end
+    }
 }

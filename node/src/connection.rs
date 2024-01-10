@@ -11,7 +11,8 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use crate::protocol::{self, HandshakeMessage, Message, ProtocolMessage};
 
-/// Connect to a peer and start read loop
+/// Connect to a peer. Creates a new Connection and calls its
+/// `start_from_connect` method.
 pub async fn connect(peer: &str) {
     log::info!("Connecting to peer: {:?}", peer);
     let stream = TcpStream::connect(peer).await.expect("Error connecting");
@@ -28,6 +29,11 @@ pub async fn connect(peer: &str) {
     }
 }
 
+/// Start listening on provided interface and port as the addr parameter
+/// addr is of the form "host:port".
+///
+/// Each accept return is handled by a Connection and its
+/// `start_from_accept` method.
 pub async fn start_listen(addr: String) -> Result<(), Box<dyn Error>> {
     log::info!("Binding to {}", addr);
     let listener = TcpListener::bind(addr).await?;
@@ -53,6 +59,10 @@ pub async fn start_listen(addr: String) -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// Connection captures the reader and writer for a connection.
+///
+/// When a connection is closed the instance is dropped by going out
+/// of scope in the creating `connect/start_listen` functions.
 pub struct Connection<R, W> {
     reader: R,
     writer: W,
@@ -65,6 +75,7 @@ where
     R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
     W: SinkExt<Bytes> + Unpin,
 {
+    /// Create a new connection with the given reader and writer.
     pub fn new(r: R, w: W) -> Self {
         //let (channel_sender, channel_receiver) = mpsc::channel(CHANNEL_CAPACITY);
         Connection {
@@ -75,6 +86,10 @@ where
         }
     }
 
+    /// Once the Connection is setup send the initial handshake protocol messages.
+    ///
+    /// Replies to all protocols are handled in the `start_read_loop`
+    /// and the `message_received` methods.
     pub async fn start_from_connect(&mut self, addr: &SocketAddr) -> Result<(), Box<dyn Error>> {
         log::info!("Starting from connect");
         let message = HandshakeMessage::start(addr).unwrap();
@@ -83,12 +98,24 @@ where
         Ok(())
     }
 
+    /// When a peer connects it will send the handshake method. So
+    /// this method just starts the read loop for now.
+    ///
+    /// TODO(pool2win): Drop connection if there is no message from a
+    /// peer in timeout period.
     pub async fn start_from_accept(&mut self) -> Result<(), Box<dyn Error>> {
         log::info!("Starting from accept");
         self.start_read_loop().await?;
         Ok(())
     }
 
+    /// Start a read loop. For now this method directly calls
+    /// `message_received` which sends any required responses.
+    ///
+    /// TODO(pool2win): Push received messages to a channel. Start
+    /// tasks to consume these received messages. We will need to send
+    /// a reference to the Connection over the channel, or we'll need
+    /// a way to enqueue responses for Connection to send back.
     pub async fn start_read_loop(&mut self) -> Result<(), Box<dyn Error>> {
         log::debug!("Start read loop....");
         loop {
@@ -110,6 +137,9 @@ where
         }
     }
 
+    /// Handles received messages by parsing the message and
+    /// demultiplexing to appropriate protocol.
+    /// See TODO for `start_read_loop`.
     async fn message_received(&mut self, msg: &Bytes) -> Result<(), &'static str> {
         let message: Message = protocol::Message::from_bytes(msg).unwrap();
         log::debug!("{:?}", message);

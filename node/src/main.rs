@@ -21,7 +21,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let _ = connection::start_listen(args.bind).await;
+    connection::start_listen(args.bind).await;
+    log::debug!("Listen done");
     Ok(())
 }
 

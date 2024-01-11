@@ -39,27 +39,33 @@ pub fn connect(peer: String) {
 ///
 /// Each accept return is handled by a Connection and its
 /// `start_from_accept` method.
-pub async fn start_listen(addr: String) -> Result<(), Box<dyn Error>> {
+pub async fn start_listen(addr: String) {
     log::info!("Binding to {}", addr);
-    let listener = TcpListener::bind(addr).await?;
-    loop {
-        // Asynchronously wait for an inbound TcpStream.
-        log::info!("Starting accept");
-        match listener.accept().await {
-            Ok((stream, _)) => {
-                log::debug!("Accepted connection");
-                let (r, w) = stream.into_split();
-                let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
-                let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
-                let mut conn = Connection::new(framed_reader, framed_writer);
+    match TcpListener::bind(addr).await {
+        Ok(listener) => {
+            loop {
+                // Asynchronously wait for an inbound TcpStream.
+                log::info!("Starting accept");
+                match listener.accept().await {
+                    Ok((stream, _)) => {
+                        log::debug!("Accepted connection");
+                        let (r, w) = stream.into_split();
+                        let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
+                        let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
+                        let mut conn = Connection::new(framed_reader, framed_writer);
 
-                tokio::spawn(async move {
-                    if conn.start_from_accept().await.is_err() {
-                        log::info!("Peer closed connection")
+                        tokio::spawn(async move {
+                            if conn.start_from_accept().await.is_err() {
+                                log::info!("Peer closed connection")
+                            }
+                        });
                     }
-                });
+                    Err(e) => log::error!("Couldn't get client on accept: {:?}", e),
+                }
             }
-            Err(e) => log::error!("Couldn't get client on accept: {:?}", e),
+        }
+        Err(e) => {
+            log::info!("Failed to listen {:?}", e);
         }
     }
 }

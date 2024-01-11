@@ -13,20 +13,25 @@ use crate::protocol::{self, HandshakeMessage, Message, ProtocolMessage};
 
 /// Connect to a peer. Creates a new Connection and calls its
 /// `start_from_connect` method.
-pub async fn connect(peer: &str) {
-    log::info!("Connecting to peer: {:?}", peer);
-    let stream = TcpStream::connect(peer).await.expect("Error connecting");
-    let (r, w) = stream.into_split();
-    let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
-    let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
-    let mut conn = Connection::new(framed_reader, framed_writer);
-    if let Ok(addr_iter) = peer.to_socket_addrs() {
-        if let Some(addr) = addr_iter.into_iter().next() {
-            if conn.start_from_connect(&addr).await.is_err() {
-                log::info!("Peer closed connection");
+/// Each new connect spawns a new task.
+pub fn connect(peer: String) {
+    tokio::spawn(async move {
+        log::info!("Connecting to peer: {:?}", peer);
+        let stream = TcpStream::connect(peer.as_str())
+            .await
+            .expect("Error connecting");
+        let (r, w) = stream.into_split();
+        let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
+        let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
+        let mut conn = Connection::new(framed_reader, framed_writer);
+        if let Ok(addr_iter) = peer.to_socket_addrs() {
+            if let Some(addr) = addr_iter.into_iter().next() {
+                if conn.start_from_connect(&addr).await.is_err() {
+                    log::info!("Peer closed connection");
+                }
             }
         }
-    }
+    });
 }
 
 /// Start listening on provided interface and port as the addr parameter

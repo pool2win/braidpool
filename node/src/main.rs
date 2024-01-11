@@ -17,9 +17,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if let Some(addpeer) = args.addpeer {
         for peer in addpeer {
-            tokio::spawn(async move {
-                connection::connect(peer.as_str()).await;
-            });
+            connection::connect(peer);
         }
     }
 

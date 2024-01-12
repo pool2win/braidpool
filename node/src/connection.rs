@@ -1,20 +1,18 @@
 use bytes::{Bytes, BytesMut};
-use std::{error::Error, net::SocketAddr};
-//use tokio::sync::mpsc;
 use futures::{SinkExt, StreamExt};
 use std::marker::Unpin;
 use std::net::ToSocketAddrs;
+use std::{error::Error, net::SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-
-// const CHANNEL_CAPACITY: usize = 32;
 
 use crate::protocol::{self, HandshakeMessage, Message, ProtocolMessage};
 
 /// Connect to a peer. Creates a new Connection and calls its
 /// `start_from_connect` method.
 /// Each new connect spawns a new task.
-pub fn connect(peer: String) {
+pub fn connect(peer: String, sender: mpsc::Sender<Bytes>) {
     tokio::spawn(async move {
         log::info!("Connecting to peer: {:?}", peer);
         let stream = TcpStream::connect(peer.as_str())
@@ -23,7 +21,7 @@ pub fn connect(peer: String) {
         let (r, w) = stream.into_split();
         let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
         let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
-        let mut conn = Connection::new(framed_reader, framed_writer);
+        let mut conn = Connection::new(framed_reader, framed_writer, sender.clone());
         if let Ok(addr_iter) = peer.to_socket_addrs() {
             if let Some(addr) = addr_iter.into_iter().next() {
                 if conn.start_from_connect(&addr).await.is_err() {
@@ -39,7 +37,7 @@ pub fn connect(peer: String) {
 ///
 /// Each accept return is handled by a Connection and its
 /// `start_from_accept` method.
-pub async fn start_listen(addr: String) {
+pub async fn start_listen(addr: String, sender: &mpsc::Sender<Bytes>) {
     log::info!("Binding to {}", addr);
     match TcpListener::bind(addr).await {
         Ok(listener) => {
@@ -52,7 +50,8 @@ pub async fn start_listen(addr: String) {
                         let (r, w) = stream.into_split();
                         let framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
                         let framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
-                        let mut conn = Connection::new(framed_reader, framed_writer);
+                        let mut conn =
+                            Connection::new(framed_reader, framed_writer, sender.clone());
 
                         tokio::spawn(async move {
                             if conn.start_from_accept().await.is_err() {
@@ -74,26 +73,23 @@ pub async fn start_listen(addr: String) {
 ///
 /// When a connection is closed the instance is dropped by going out
 /// of scope in the creating `connect/start_listen` functions.
-pub struct Connection<R, W> {
+pub struct Connection<R, W, S> {
     reader: R,
     writer: W,
-    //channel_receiver: mpsc::Receiver<String>,
-    //channel_sender: mpsc::Sender<String>,
+    sender: S,
 }
 
-impl<R, W> Connection<R, W>
+impl<R, W, S> Connection<R, W, S>
 where
     R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
     W: SinkExt<Bytes> + Unpin,
 {
     /// Create a new connection with the given reader and writer.
-    pub fn new(r: R, w: W) -> Self {
-        //let (channel_sender, channel_receiver) = mpsc::channel(CHANNEL_CAPACITY);
+    pub fn new(r: R, w: W, s: S) -> Self {
         Connection {
             reader: r,
             writer: w,
-            // channel_receiver,
-            // channel_sender,
+            sender: s,
         }
     }
 
@@ -192,7 +188,9 @@ mod tests {
 
         assert!(result.unwrap().is_ok_and(|rr| rr == msg[..]));
 
-        Connection::new(framed_reader, framed_writer);
+        let (sender, _) = mpsc::channel::<Bytes>(3);
+
+        Connection::new(framed_reader, framed_writer, sender);
     }
 
     #[tokio::test]
@@ -201,7 +199,9 @@ mod tests {
         let writer: Vec<Bytes> = vec![];
 
         let reader_iter = stream::iter(reader);
-        Connection::new(reader_iter, writer);
+
+        let (sender, _) = mpsc::channel::<Bytes>(3);
+        Connection::new(reader_iter, writer, sender);
     }
 
     #[tokio::test]
@@ -210,7 +210,8 @@ mod tests {
         let writer: Vec<Bytes> = vec![];
 
         let reader_iter = stream::iter(reader);
-        let mut connection = Connection::new(reader_iter, writer);
+        let (sender, _) = mpsc::channel::<Bytes>(3);
+        let mut connection = Connection::new(reader_iter, writer, sender);
 
         let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         let message = HandshakeMessage::start(addr).unwrap();
@@ -231,7 +232,8 @@ mod tests {
         let writer: Vec<Bytes> = vec![];
 
         let reader_iter = stream::iter(reader);
-        let mut connection = Connection::new(reader_iter, writer);
+        let (sender, _) = mpsc::channel::<Bytes>(3);
+        let mut connection = Connection::new(reader_iter, writer, sender);
 
         let read_result = connection.reader.next().await;
         assert!(read_result.is_some());
@@ -249,7 +251,8 @@ mod tests {
         let writer: Vec<Bytes> = vec![];
 
         let reader_iter = stream::iter(reader);
-        let mut connection = Connection::new(reader_iter, writer);
+        let (sender, _) = mpsc::channel::<Bytes>(3);
+        let mut connection = Connection::new(reader_iter, writer, sender);
 
         assert!(connection.start_read_loop().await.is_err()); // reading from limited vec results in None in the end
     }
@@ -264,7 +267,8 @@ mod tests {
         let writer: Vec<Bytes> = vec![];
 
         let reader_iter = stream::iter(reader);
-        let mut connection = Connection::new(reader_iter, writer);
+        let (sender, _) = mpsc::channel::<Bytes>(3);
+        let mut connection = Connection::new(reader_iter, writer, sender);
 
         assert!(connection.start_from_connect(addr).await.is_err()); // reading from limited vec results in None in the end
     }
@@ -279,7 +283,8 @@ mod tests {
         let writer: Vec<Bytes> = vec![];
 
         let reader_iter = stream::iter(reader);
-        let mut connection = Connection::new(reader_iter, writer);
+        let (sender, _) = mpsc::channel::<Bytes>(3);
+        let mut connection = Connection::new(reader_iter, writer, sender);
 
         assert!(connection.start_from_accept().await.is_err()); // reading from limited vec results in None in the end
     }
@@ -289,10 +294,14 @@ mod tests {
     // TODO(pool2win) - Enable test for connect and start_listen once we have channels setup
     async fn it_should_start_listen_without_errors() {
         let _ = env_logger::try_init();
-        let listen_handle =
-            tokio::spawn(async move { start_listen("localhost:25188".to_string()).await });
+        let (sender, _) = mpsc::channel::<Bytes>(3);
 
-        connect("localhost:25188".to_string());
+        let sender_for_listen = sender.clone();
+        let listen_handle = tokio::spawn(async move {
+            start_listen("localhost:25188".to_string(), &sender_for_listen).await
+        });
+
+        connect("localhost:25188".to_string(), sender.clone());
         let _ = listen_handle.await;
     }
 }

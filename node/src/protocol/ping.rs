@@ -15,7 +15,7 @@ impl ProtocolMessage for PingMessage {
         }))
     }
 
-    fn response_for_received(&self) -> Result<Option<Message>, &'static str> {
+    fn response_for_received(&self) -> Result<Option<Message>, String> {
         log::info!("Received {:?}", self.message);
         if self.message == "ping" {
             Ok(Some(Message::Ping(PingMessage {

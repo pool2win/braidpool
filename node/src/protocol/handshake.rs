@@ -16,7 +16,7 @@ impl ProtocolMessage for HandshakeMessage {
         }))
     }
 
-    fn response_for_received(&self) -> Result<Option<Message>, &'static str> {
+    fn response_for_received(&self) -> Result<Option<Message>, String> {
         log::info!("Received {:?}", self);
         match self {
             HandshakeMessage { message, version } if message == "helo" && version == "0.1.0" => {
@@ -28,7 +28,7 @@ impl ProtocolMessage for HandshakeMessage {
             HandshakeMessage { message, version } if message == "oleh" && version == "0.1.0" => {
                 Ok(None)
             }
-            _ => Err("Bad message"),
+            _ => Err("Bad message".to_string()),
         }
     }
 }
@@ -75,7 +75,7 @@ mod tests {
         });
 
         let response = start_message.response_for_received();
-        assert_eq!(response, Err("Bad message"));
+        assert_eq!(response, Err("Bad message".to_string()));
     }
 
     #[test]
@@ -86,6 +86,6 @@ mod tests {
         });
 
         let response = start_message.response_for_received();
-        assert_eq!(response, Err("Bad message"));
+        assert_eq!(response, Err("Bad message".to_string()));
     }
 }

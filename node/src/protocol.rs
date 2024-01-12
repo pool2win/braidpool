@@ -22,18 +22,22 @@ pub enum Message {
     Heartbeat(HeartbeatMessage),
 }
 
+/// Methods for all protocol messages
 impl Message {
+    /// Return the message as bytes
     pub fn as_bytes(&self) -> Option<Bytes> {
         let mut s = flexbuffers::FlexbufferSerializer::new();
         self.serialize(&mut s).unwrap();
         Some(Bytes::from(s.take_buffer()))
     }
 
+    /// Build message from bytes
     pub fn from_bytes(b: &[u8]) -> Result<Self, Box<dyn Error>> {
         Ok(flexbuffers::from_slice(b)?)
     }
 
-    pub fn response_for_received(&self) -> Result<Option<Message>, &'static str> {
+    /// Generates the response to send for a message received
+    pub fn response_for_received(&self) -> Result<Option<Message>, String> {
         match self {
             Message::Ping(m) => m.response_for_received(),
             Message::Handshake(m) => m.response_for_received(),
@@ -42,12 +46,13 @@ impl Message {
     }
 }
 
+/// Trait implemented by all protocol messages
 pub trait ProtocolMessage
 where
     Self: Sized,
 {
     fn start(addr: &SocketAddr) -> Option<Message>;
-    fn response_for_received(&self) -> Result<Option<Message>, &'static str>;
+    fn response_for_received(&self) -> Result<Option<Message>, String>;
 }
 
 #[cfg(test)]

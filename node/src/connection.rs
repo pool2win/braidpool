@@ -285,4 +285,16 @@ mod tests {
 
         assert!(connection.start_from_accept().await.is_err()); // reading from limited vec results in None in the end
     }
+
+    #[tokio::test]
+    #[ignore]
+    // TODO(pool2win) - Enable test for connect and start_listen once we have channels setup
+    async fn it_should_start_listen_without_errors() {
+        let _ = env_logger::try_init();
+        let listen_handle =
+            tokio::spawn(async move { start_listen("localhost:25188".to_string()).await });
+
+        connect("localhost:25188".to_string());
+        let _ = listen_handle.await;
+    }
 }

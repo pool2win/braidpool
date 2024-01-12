@@ -105,8 +105,7 @@ where
         log::info!("Starting from connect");
         let message = HandshakeMessage::start(addr).unwrap();
         let _ = self.writer.send(message.as_bytes().unwrap()).await;
-        self.start_read_loop().await?;
-        Ok(())
+        self.start_read_loop().await
     }
 
     /// When a peer connects it will send the handshake method. So
@@ -116,8 +115,7 @@ where
     /// peer in timeout period.
     pub async fn start_from_accept(&mut self) -> Result<(), Box<dyn Error>> {
         log::info!("Starting from accept");
-        self.start_read_loop().await?;
-        Ok(())
+        self.start_read_loop().await
     }
 
     /// Start a read loop. For now this method directly calls

@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 mod cli;
 mod connection;
+mod connection_manager;
 mod protocol;
 
 const CHANNEL_CAPACITY: usize = 32;

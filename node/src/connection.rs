@@ -7,6 +7,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
+use crate::connection_manager;
 use crate::protocol::{self, HandshakeMessage, Message, ProtocolMessage};
 
 /// Connect to a peer. Creates a new Connection and calls its

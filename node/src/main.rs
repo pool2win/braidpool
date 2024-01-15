@@ -1,14 +1,9 @@
-use bytes::Bytes;
 use clap::Parser;
 use std::error::Error;
-use tokio::sync::mpsc;
 
 mod cli;
 mod connection;
-mod connection_manager;
 mod protocol;
-
-const CHANNEL_CAPACITY: usize = 32;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -20,15 +15,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     setup_logging()?;
     setup_tracing()?;
 
-    let (sender, mut _receiver) = mpsc::channel::<Bytes>(CHANNEL_CAPACITY);
-
     if let Some(addpeer) = args.addpeer {
         for peer in addpeer {
-            connection::connect(peer, sender.clone());
+            connection::connect(peer);
         }
     }
 
-    connection::start_listen(args.bind, &sender.clone()).await;
+    connection::start_listen(args.bind).await;
     log::debug!("Listen done");
     Ok(())
 }

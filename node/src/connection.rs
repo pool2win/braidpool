@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-use crate::protocol::{self, HandshakeMessage, Message, ProtocolMessage};
+use crate::protocol::{self, HandshakeMessage, ProtocolMessage};
 
 const CHANNEL_CAPACITY: usize = 32;
 
@@ -112,31 +112,40 @@ where
     }
 }
 
-async fn start_message_handler<W>(writer: &mut W, channel_receiver: &mut Receiver)
+async fn start_message_handler<W>(
+    writer: &mut W,
+    channel_receiver: &mut Receiver,
+) -> Result<(), Box<dyn Error>>
 where
     W: SinkExt<Bytes> + Unpin + Sync + Send,
 {
     while let Some(msg) = channel_receiver.recv().await {
         log::info!("Received message");
-        let message: Message = protocol::Message::from_bytes(&msg).unwrap();
-        log::debug!("{:?}", message);
+        let message: protocol::Message;
+        if let Ok(msg) = protocol::Message::from_bytes(&msg) {
+            message = msg;
+        } else {
+            return Err("Error parsing message".into());
+        }
         match message.response_for_received() {
             Ok(result) => {
                 if let Some(response) = result {
                     if let Some(to_send) = response.as_bytes() {
                         if (writer.send(to_send).await).is_err() {
-                            log::info!("Send failed: Closing peer connection");
+                            return Err("Send failed: Closing peer connection".into());
                         }
                     } else {
-                        log::info!("Error serializing: Closing peer connection");
+                        return Err("Error serializing: Closing peer connection".into());
                     }
                 }
             }
             Err(_) => {
-                log::info!("Error constructing response: Closing peer connection");
+                return Err("Error constructing response: Closing peer connection".into());
             }
         }
     }
+    log::debug!("returning from start message handler...");
+    Ok(())
 }
 
 /// Once a connection is setup send the initial handshake protocol
@@ -161,12 +170,14 @@ pub async fn start<R, W>(
     let _ = writer.send(message.as_bytes().unwrap()).await;
     tokio::select! {
         _ = start_read_loop(reader, channel_sender) => {
+            log::debug!("Read loop returned: Closing connection to {:?}", addr);
+            channel_receiver.close();
         }
         _ = start_message_handler(writer, channel_receiver) => {
+            log::debug!("Message handler returned: Closing connection to {:?}", addr);
+            channel_receiver.close();
         }
     };
-    log::info!("Closing connection to {:?}", addr);
-    channel_receiver.close();
     let _ = writer.close().await;
 }
 
@@ -295,6 +306,35 @@ mod tests {
         let received = start_read_loop(&mut reader_iter, sender).await;
         log::debug!("{:?}", received);
         assert!(received.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_should_handle_message_received_on_channel() {
+        let _ = env_logger::try_init();
+        let mut writer: Vec<Bytes> = vec![];
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let message = HandshakeMessage::start(&addr).unwrap();
+        let _msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![];
+        let mut _reader_iter = stream::iter(reader);
+
+        let (sender, mut receiver) = mpsc::channel::<Bytes>(3);
+
+        let spawn_handle = tokio::spawn(async move {
+            let r = start_message_handler(&mut writer, &mut receiver).await;
+            assert_eq!(
+                r.unwrap_err().to_string(),
+                "Error parsing message".to_string()
+            );
+        });
+
+        // first send a message that is handled correctly
+        let _ = sender.send(message.as_bytes().unwrap()).await;
+
+        // then send a message that can't be parsed and results in channel closing
+        let _ = sender.send(Bytes::from("hello world")).await;
+        let _ = spawn_handle.await;
     }
 }
 

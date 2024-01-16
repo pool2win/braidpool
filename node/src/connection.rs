@@ -245,9 +245,7 @@ mod tests {
             let _ = start_read_loop(&mut reader_iter, sender).await;
         });
 
-        let Some(received) = receiver.recv().await else {
-            todo!()
-        };
+        let received = receiver.recv().await.unwrap();
         assert_eq!(Some(received), message.as_bytes());
     }
 

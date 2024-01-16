@@ -188,46 +188,18 @@ mod tests {
     use futures::stream;
     use std::io::ErrorKind;
     use std::net::{IpAddr, Ipv4Addr};
-    // use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-    // #[tokio::test]
-    // async fn it_should_run_connect_without_errors() {
-    //     let _ = env_logger::try_init();
+    #[tokio::test]
+    // TODO: This is a smoke test and we need to improve how we wait for listen to complete before we invoke connect.
+    async fn it_should_run_connect_without_errors() {
+        let _ = env_logger::try_init();
 
-    //     tokio::spawn(async {
-    //         start_listen("localhost:25188".to_string()).await;
-    //     });
-    //     log::debug!("abc");
+        tokio::spawn(async move {
+            start_listen("localhost:25188".to_string()).await;
+        });
 
-    //     let connect_handle = connect("localhost:25188".to_string());
-    //     assert!(connect_handle.await.is_ok());
-    // }
-
-    // #[tokio::test]
-    // async fn it_should_start_read_loop_with_vector_streams() {
-    //     let (r, w) = tokio::io::duplex(64);
-    //     let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
-    //     let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
-
-    //     let msg = Bytes::from("Hello World!");
-    //     let _ = framed_writer.send(msg.clone()).await;
-    //     let result = framed_reader.next().await;
-
-    //     assert!(result.unwrap().is_ok_and(|rr| rr == msg[..]));
-
-    //     let (channel_sender, channel_receiver) = mpsc::channel::<Bytes>(3);
-
-    //     // 1. listen to channel - when message received, terminate test
-
-    //     // 2. spawn read loop
-    //     tokio::spawn(async move {
-    //         let _ = start_read_loop(&mut framed_reader, sender).await;
-    //     });
-
-    //     // 3. finally send a message on the channel
-
-    //     // 4. write more tests to handle error branches
-    // }
+        let _ = connect("localhost:25188".to_string()).await;
+    }
 
     #[tokio::test]
     async fn it_should_read_message_from_stream_and_send_to_channel_sender() {
@@ -335,87 +307,3 @@ mod tests {
         let _ = spawn_handle.await;
     }
 }
-
-//     #[tokio::test]
-//     async fn it_should_read_bytes_from_reader_succesfully() {
-//         let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-//         let message = HandshakeMessage::start(addr).unwrap();
-//         let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
-
-//         let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes)];
-//         let writer: Vec<Bytes> = vec![];
-
-//         let reader_iter = stream::iter(reader);
-//         let (sender, _) = mpsc::channel::<Bytes>(3);
-//         let mut connection = Connection::new(reader_iter, writer, sender);
-
-//         let read_result = connection.reader.next().await;
-//         assert!(read_result.is_some());
-//         let result = read_result.unwrap().expect("Error reading result");
-//         assert_eq!(result, message.as_bytes().unwrap());
-//     }
-
-//     #[tokio::test]
-//     async fn it_should_start_read_loop() {
-//         let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-//         let message = HandshakeMessage::start(addr).unwrap();
-//         let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
-//         let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes)];
-
-//         let writer: Vec<Bytes> = vec![];
-
-//         let reader_iter = stream::iter(reader);
-//         let (sender, _) = mpsc::channel::<Bytes>(3);
-//         let mut connection = Connection::new(reader_iter, writer, sender);
-
-//         assert!(connection.start_read_loop().await.is_err()); // reading from limited vec results in None in the end
-//     }
-
-//     #[tokio::test]
-//     async fn it_should_start_from_connect() {
-//         let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-//         let message = HandshakeMessage::start(addr).unwrap();
-//         let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
-//         let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes)];
-
-//         let writer: Vec<Bytes> = vec![];
-
-//         let reader_iter = stream::iter(reader);
-//         let (sender, _) = mpsc::channel::<Bytes>(3);
-//         let mut connection = Connection::new(reader_iter, writer, sender);
-
-//         assert!(connection.start_from_connect(addr).await.is_err()); // reading from limited vec results in None in the end
-//     }
-
-//     #[tokio::test]
-//     async fn it_should_start_from_accept() {
-//         let addr = &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-//         let message = HandshakeMessage::start(addr).unwrap();
-//         let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
-//         let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes)];
-
-//         let writer: Vec<Bytes> = vec![];
-
-//         let reader_iter = stream::iter(reader);
-//         let (sender, _) = mpsc::channel::<Bytes>(3);
-//         let mut connection = Connection::new(reader_iter, writer, sender);
-
-//         assert!(connection.start_from_accept().await.is_err()); // reading from limited vec results in None in the end
-//     }
-
-//     #[tokio::test]
-//     #[ignore]
-//     // TODO(pool2win) - Enable test for connect and start_listen once we have channels setup
-//     async fn it_should_start_listen_without_errors() {
-//         let _ = env_logger::try_init();
-//         let (sender, _) = mpsc::channel::<Bytes>(3);
-
-//         let sender_for_listen = sender.clone();
-//         let listen_handle = tokio::spawn(async move {
-//             start_listen("localhost:25188".to_string(), &sender_for_listen).await
-//         });
-
-//         connect("localhost:25188".to_string(), sender.clone());
-//         let _ = listen_handle.await;
-//     }
-// }

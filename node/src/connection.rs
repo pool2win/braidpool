@@ -17,6 +17,10 @@ type Receiver = mpsc::Receiver<Bytes>;
 
 /// Split provided stream, create an internal channel and spawn tasks
 /// to use the reader, writer, and channel sender, receiver.
+///
+/// Decoupling the read from tcp stream to handling messages prevents
+/// long running tasks stalling further reads. It also allows spawning
+/// tasks to handle individual messages - if needed.
 async fn start_connection(stream: TcpStream, addr: SocketAddr) -> JoinHandle<()> {
     let (r, w) = stream.into_split();
     let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
@@ -50,9 +54,10 @@ pub fn connect(peer: String) -> JoinHandle<()> {
     })
 }
 
-/// Start listening on provided interface and port as the addr parameter
+/// Start listening on provided interface and port as the addr parameter.
+///
 /// addr is of the form "host:port".
-/// Each new accept returns spawns two new task from `start`.
+/// Each new accept returns spawns two new task using `start_connection`.
 pub async fn start_listen(addr: String) {
     log::info!("Binding to {}", addr);
     match TcpListener::bind(addr).await {
@@ -75,33 +80,37 @@ pub async fn start_listen(addr: String) {
     }
 }
 
-/// Start a read loop, reading from tcp stream and writer to bounded channel sender.
+/// Start a read loop
+/// Reading from tcp stream and writer to internal bounded channel sender.
 async fn start_read_loop<R>(reader: &mut R, channel_sender: Sender) -> Result<(), Box<dyn Error>>
 where
     R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
 {
-    log::debug!("Start read loop....");
     loop {
-        log::debug!("Read loop ....");
+        log::debug!("Read loop....");
         if let Some(message) = reader.next().await {
             match message {
                 Ok(message) => {
-                    log::debug!("read message.... {:?}", message.len());
+                    log::debug!("Read message.... {:?}", message.len());
                     if channel_sender.send(message.freeze()).await.is_err() {
                         return Err("Error handling received message".into());
                     }
                     log::debug!("Message sent on channel...");
                 }
                 Err(_) => {
-                    return Err("message receive: peer closed connection".into());
+                    return Err("Message receive: peer closed connection".into());
                 }
             }
         } else {
-            return Err("receive: peer closed connection".into());
+            return Err("Receive: peer closed connection".into());
         }
     }
 }
 
+/// Start message handler
+///
+/// Reads received messages from internal bounded channel and writes
+/// response obtained from Protocol
 async fn start_message_handler<W>(
     writer: &mut W,
     channel_receiver: &mut Receiver,
@@ -138,13 +147,10 @@ where
     Ok(())
 }
 
-/// Once a connection is setup send the initial handshake protocol
-/// messages and start the read loop as well as task to handle
-/// received messages.
-///
-/// Decoupling the read from tcp stream to handling messages prevents
-/// long running tasks stalling further reads. It also allows spawning
-/// tasks to handle individual messages - if needed.
+/// Start read loop and message handler and wait for either of them to
+/// return. When one returns, closes the writer and the
+/// receiver. These calls to close will result in the spawned tasks
+/// aborting.
 async fn start<R, W>(
     addr: SocketAddr,
     reader: &mut R,
@@ -296,15 +302,4 @@ mod tests {
         let _ = sender.send(Bytes::from("hello world")).await;
         let _ = spawn_handle.await;
     }
-
-    // #[tokio::test]
-    // async fn it_should_run_start_connection_without_errors() {
-    //     let _ = env_logger::try_init();
-
-    //     tokio::spawn(async move {
-    //         start_listen("localhost:25188".to_string()).await;
-    //     });
-
-    //     let _ = connect("localhost:25188".to_string()).await;
-    // }
 }

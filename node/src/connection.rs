@@ -15,30 +15,36 @@ const CHANNEL_CAPACITY: usize = 32;
 type Sender = mpsc::Sender<Bytes>;
 type Receiver = mpsc::Receiver<Bytes>;
 
+/// Split provided stream, create an internal channel and spawn tasks
+/// to use the reader, writer, and channel sender, receiver.
+async fn start_connection(stream: TcpStream, addr: SocketAddr) -> JoinHandle<()> {
+    let (r, w) = stream.into_split();
+    let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
+    let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
+    let (sender, mut receiver) = mpsc::channel::<Bytes>(CHANNEL_CAPACITY);
+    tokio::spawn(async move {
+        start(
+            addr,
+            &mut framed_reader,
+            &mut framed_writer,
+            sender,
+            &mut receiver,
+        )
+        .await;
+    })
+}
+
 /// Connect to a peer.
 /// Each new connect spawns two new task from `start`.
 pub fn connect(peer: String) -> JoinHandle<()> {
     tokio::spawn(async move {
         log::info!("Connecting to peer: {:?}", peer);
-        let (sender, mut receiver) = mpsc::channel::<Bytes>(CHANNEL_CAPACITY);
         let stream = TcpStream::connect(peer.as_str())
             .await
-            .expect("Error connecting");
-        let (r, w) = stream.into_split();
-        let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
-        let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
+            .expect("Error connecting to peer");
         if let Ok(addr_iter) = peer.to_socket_addrs() {
             if let Some(addr) = addr_iter.into_iter().next() {
-                tokio::spawn(async move {
-                    start(
-                        addr,
-                        &mut framed_reader,
-                        &mut framed_writer,
-                        sender,
-                        &mut receiver,
-                    )
-                    .await;
-                });
+                start_connection(stream, addr).await;
             }
         }
     })
@@ -57,20 +63,7 @@ pub async fn start_listen(addr: String) {
                 match listener.accept().await {
                     Ok((stream, peer_address)) => {
                         log::info!("Accepted connection from {:?}", peer_address);
-                        let (r, w) = stream.into_split();
-                        let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
-                        let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
-                        let (sender, mut receiver) = mpsc::channel::<Bytes>(CHANNEL_CAPACITY);
-                        tokio::spawn(async move {
-                            start(
-                                peer_address,
-                                &mut framed_reader,
-                                &mut framed_writer,
-                                sender,
-                                &mut receiver,
-                            )
-                            .await;
-                        });
+                        start_connection(stream, peer_address).await;
                     }
                     Err(e) => log::error!("Couldn't get client on accept: {:?}", e),
                 }
@@ -83,10 +76,7 @@ pub async fn start_listen(addr: String) {
 }
 
 /// Start a read loop, reading from tcp stream and writer to bounded channel sender.
-pub async fn start_read_loop<R>(
-    reader: &mut R,
-    channel_sender: Sender,
-) -> Result<(), Box<dyn Error>>
+async fn start_read_loop<R>(reader: &mut R, channel_sender: Sender) -> Result<(), Box<dyn Error>>
 where
     R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
 {
@@ -155,7 +145,7 @@ where
 /// Decoupling the read from tcp stream to handling messages prevents
 /// long running tasks stalling further reads. It also allows spawning
 /// tasks to handle individual messages - if needed.
-pub async fn start<R, W>(
+async fn start<R, W>(
     addr: SocketAddr,
     reader: &mut R,
     writer: &mut W,
@@ -165,7 +155,7 @@ pub async fn start<R, W>(
     R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
     W: SinkExt<Bytes> + Unpin + Send + Sync,
 {
-    log::info!("Starting from connect");
+    log::info!("Spawning tasks");
     let message = HandshakeMessage::start(&addr).unwrap();
     let _ = writer.send(message.as_bytes().unwrap()).await;
     tokio::select! {
@@ -306,4 +296,15 @@ mod tests {
         let _ = sender.send(Bytes::from("hello world")).await;
         let _ = spawn_handle.await;
     }
+
+    // #[tokio::test]
+    // async fn it_should_run_start_connection_without_errors() {
+    //     let _ = env_logger::try_init();
+
+    //     tokio::spawn(async move {
+    //         start_listen("localhost:25188".to_string()).await;
+    //     });
+
+    //     let _ = connect("localhost:25188".to_string()).await;
+    // }
 }

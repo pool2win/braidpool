@@ -10,7 +10,8 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-use crate::connection_manager::{ConnectionManager, Metadata};
+use crate::connection_manager::ConnectionManager;
+use crate::connection_manager::Metadata;
 use crate::protocol::{self, HandshakeMessage, ProtocolMessage};
 
 const CHANNEL_CAPACITY: usize = 32;
@@ -205,6 +206,8 @@ mod tests {
     #[tokio::test]
     // TODO: This is a smoke test and we need to improve how we wait for listen to complete before we invoke connect.
     async fn it_should_run_connect_without_errors() {
+        use tokio::time::{sleep, Duration};
+
         let _ = env_logger::try_init();
 
         // listen and client are from different clients, and therefore we need two different connection managers.
@@ -217,6 +220,9 @@ mod tests {
         tokio::spawn(async move {
             start_listen("localhost:25188".to_string(), listen_manager_cloned).await;
         });
+
+        // TODO: Fix this smoke test! Kill the sleep in this smoke test.
+        sleep(Duration::from_millis(100)).await;
 
         let _ = connect("localhost:25188".to_string(), connect_manager_cloned).await;
 

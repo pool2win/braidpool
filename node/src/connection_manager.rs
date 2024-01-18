@@ -1,16 +1,18 @@
-use bytes::Bytes;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Mutex;
+use std::time::SystemTime;
 
-use tokio::sync::mpsc;
+/// Connection state including connection initialisation time
+#[derive(Clone)]
+pub struct Metadata {
+    pub created_at: SystemTime,
+}
 
-type Sender = mpsc::Sender<Bytes>;
-type Map = HashMap<SocketAddr, Sender>;
+type Map = HashMap<SocketAddr, Metadata>;
 
 pub struct ConnectionManager {
-    lock: Mutex<Map>,
-    map: Map,
+    shared_state: Mutex<Map>,
 }
 
 /// ConnectionManager struct maps a peer's IP address to the sender
@@ -26,27 +28,32 @@ impl ConnectionManager {
             /// Use a Mutex here as changes to this table will be
             /// infrequent. We can replace with crossbeam SkipMap if
             /// this becomes a performance bottleneck.
-            lock: Mutex::new(Map::new()),
-            map: Map::new(),
+            shared_state: Mutex::new(Map::new()),
         }
     }
 
     /// Insert a new peer's IP address and sender channel
-    pub fn insert(&mut self, addr: SocketAddr, s: Sender) -> Option<Sender> {
-        let _ = self.lock.lock();
-        self.map.insert(addr, s)
+    pub fn insert(&self, addr: SocketAddr, s: Metadata) -> Option<Metadata> {
+        let mut state = self.shared_state.lock().unwrap();
+        state.insert(addr, s)
     }
 
     /// Remove a peer's IP address
-    pub fn remove(&mut self, addr: &SocketAddr) -> Option<Sender> {
-        let _ = self.lock.lock();
-        self.map.remove(addr)
+    pub fn remove(&self, addr: &SocketAddr) -> Option<Metadata> {
+        let mut state = self.shared_state.lock().unwrap();
+        state.remove(addr)
     }
 
     /// Find the sender channel for a peer's SocketAddr
-    pub fn get(&mut self, addr: &SocketAddr) -> Option<&Sender> {
-        let _ = self.lock.lock(); // read only, still grab the mutex
-        self.map.get(addr)
+    pub fn get(&self, addr: &SocketAddr) -> Option<Metadata> {
+        let state = self.shared_state.lock().unwrap();
+        state.get(addr).cloned()
+    }
+
+    /// Returns the number of connections
+    pub fn num_connections(&self) -> usize {
+        let state = self.shared_state.lock().unwrap();
+        state.len()
     }
 }
 
@@ -57,21 +64,25 @@ mod test {
     #[test]
     pub fn it_should_create_connections_map() {
         let conns = ConnectionManager::new();
-        assert_eq!(conns.map.len(), 0);
+        assert_eq!(conns.shared_state.lock().unwrap().len(), 0);
     }
 
     #[test]
     pub fn it_should_insert_new_address() {
-        let mut conns = ConnectionManager::new();
-        let (s, _) = mpsc::channel(10);
+        let manager = ConnectionManager::new();
+        let s = Metadata {
+            created_at: SystemTime::now(),
+        };
         let local = "127.0.0.1:8080".parse().unwrap();
         let other = "127.0.0.1:8081".parse().unwrap();
 
-        assert!(conns.insert(local, s).is_none());
+        assert!(manager.insert(local, s).is_none());
+        assert_eq!(manager.num_connections(), 1);
 
-        assert!(conns.get(&local).is_some());
-        assert!(conns.get(&other).is_none());
+        assert!(manager.get(&local).is_some());
+        assert!(manager.get(&other).is_none());
 
-        assert!(conns.remove(&local).is_some());
+        assert!(manager.remove(&local).is_some());
+        assert_eq!(manager.num_connections(), 0);
     }
 }

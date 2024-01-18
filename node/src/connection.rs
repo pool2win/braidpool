@@ -2,12 +2,15 @@ use bytes::{Bytes, BytesMut};
 use futures::{SinkExt, StreamExt};
 use std::marker::Unpin;
 use std::net::ToSocketAddrs;
+use std::sync::Arc;
+use std::time::SystemTime;
 use std::{error::Error, net::SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
+use crate::connection_manager::{ConnectionManager, Metadata};
 use crate::protocol::{self, HandshakeMessage, ProtocolMessage};
 
 const CHANNEL_CAPACITY: usize = 32;
@@ -21,7 +24,11 @@ type Receiver = mpsc::Receiver<Bytes>;
 /// Decoupling the read from tcp stream to handling messages prevents
 /// long running tasks stalling further reads. It also allows spawning
 /// tasks to handle individual messages - if needed.
-async fn start_connection(stream: TcpStream, addr: SocketAddr) -> JoinHandle<()> {
+async fn start_connection(
+    stream: TcpStream,
+    addr: SocketAddr,
+    manager: Arc<ConnectionManager>,
+) -> JoinHandle<()> {
     let (r, w) = stream.into_split();
     let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
     let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
@@ -33,6 +40,7 @@ async fn start_connection(stream: TcpStream, addr: SocketAddr) -> JoinHandle<()>
             &mut framed_writer,
             sender,
             &mut receiver,
+            manager,
         )
         .await;
     })
@@ -40,7 +48,7 @@ async fn start_connection(stream: TcpStream, addr: SocketAddr) -> JoinHandle<()>
 
 /// Connect to a peer.
 /// Each new connect spawns two new task from `start`.
-pub fn connect(peer: String) -> JoinHandle<()> {
+pub fn connect(peer: String, manager: Arc<ConnectionManager>) -> JoinHandle<()> {
     tokio::spawn(async move {
         log::info!("Connecting to peer: {:?}", peer);
         let stream = TcpStream::connect(peer.as_str())
@@ -48,7 +56,7 @@ pub fn connect(peer: String) -> JoinHandle<()> {
             .expect("Error connecting to peer");
         if let Ok(addr_iter) = peer.to_socket_addrs() {
             if let Some(addr) = addr_iter.into_iter().next() {
-                start_connection(stream, addr).await;
+                start_connection(stream, addr, manager).await;
             }
         }
     })
@@ -58,7 +66,7 @@ pub fn connect(peer: String) -> JoinHandle<()> {
 ///
 /// addr is of the form "host:port".
 /// Each new accept returns spawns two new task using `start_connection`.
-pub async fn start_listen(addr: String) {
+pub async fn start_listen(addr: String, manager: Arc<ConnectionManager>) {
     log::info!("Binding to {}", addr);
     match TcpListener::bind(addr).await {
         Ok(listener) => {
@@ -68,7 +76,7 @@ pub async fn start_listen(addr: String) {
                 match listener.accept().await {
                     Ok((stream, peer_address)) => {
                         log::info!("Accepted connection from {:?}", peer_address);
-                        start_connection(stream, peer_address).await;
+                        start_connection(stream, peer_address, manager.clone()).await;
                     }
                     Err(e) => log::error!("Couldn't get client on accept: {:?}", e),
                 }
@@ -157,11 +165,18 @@ async fn start<R, W>(
     writer: &mut W,
     channel_sender: Sender,
     channel_receiver: &mut Receiver,
+    manager: Arc<ConnectionManager>,
 ) where
     R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
     W: SinkExt<Bytes> + Unpin + Send + Sync,
 {
     log::info!("Spawning tasks");
+    manager.insert(
+        addr,
+        Metadata {
+            created_at: SystemTime::now(),
+        },
+    );
     let message = HandshakeMessage::start(&addr).unwrap();
     let _ = writer.send(message.as_bytes().unwrap()).await;
     tokio::select! {
@@ -174,7 +189,9 @@ async fn start<R, W>(
             channel_receiver.close();
         }
     };
+    // Cleanup - first close tcpstream, then remove from connection manager
     let _ = writer.close().await;
+    manager.remove(&addr);
 }
 
 #[cfg(test)]
@@ -190,11 +207,21 @@ mod tests {
     async fn it_should_run_connect_without_errors() {
         let _ = env_logger::try_init();
 
+        // listen and client are from different clients, and therefore we need two different connection managers.
+        let listen_manager = Arc::new(ConnectionManager::new());
+        let connect_manager = Arc::new(ConnectionManager::new());
+
+        let listen_manager_cloned = listen_manager.clone();
+        let connect_manager_cloned = connect_manager.clone();
+
         tokio::spawn(async move {
-            start_listen("localhost:25188".to_string()).await;
+            start_listen("localhost:25188".to_string(), listen_manager_cloned).await;
         });
 
-        let _ = connect("localhost:25188".to_string()).await;
+        let _ = connect("localhost:25188".to_string(), connect_manager_cloned).await;
+
+        assert_eq!(listen_manager.num_connections(), 1);
+        assert_eq!(connect_manager.num_connections(), 1);
     }
 
     #[tokio::test]
@@ -301,5 +328,43 @@ mod tests {
         // then send a message that can't be parsed and results in channel closing
         let _ = sender.send(Bytes::from("hello world")).await;
         let _ = spawn_handle.await;
+    }
+
+    #[tokio::test]
+    async fn it_should_add_to_connection_manager_on_starting_connection() {
+        let _ = env_logger::try_init();
+        let mut writer: Vec<Bytes> = vec![];
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let message = HandshakeMessage::start(&addr).unwrap();
+        let _msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![];
+        let mut _reader_iter = stream::iter(reader);
+
+        let (sender, mut receiver) = mpsc::channel::<Bytes>(3);
+        let sender_cloned = sender.clone();
+
+        let start_manager = Arc::new(ConnectionManager::new());
+        let start_manager_cloned = start_manager.clone();
+
+        let spawn_handle = tokio::spawn(async move {
+            start(
+                addr,
+                &mut _reader_iter,
+                &mut writer,
+                sender_cloned,
+                &mut receiver,
+                start_manager_cloned,
+            )
+            .await;
+        });
+
+        // first send a message that is handled correctly
+        let _ = sender.send(message.as_bytes().unwrap()).await;
+
+        // then send a message that can't be parsed and results in channel closing
+        let _ = sender.send(Bytes::from("hello world")).await;
+        let _ = spawn_handle.await;
+        assert_eq!(start_manager.num_connections(), 0);
     }
 }

@@ -92,6 +92,12 @@ pub async fn start_listen(addr: String, manager: Arc<ConnectionManager>) {
 
 /// Start a read loop
 /// Reading from tcp stream and writer to internal bounded channel sender.
+///
+/// Returns errors if downstream is unable to keep pace with messages
+/// received. This helps handle DDoS attacks by peers flooding the connection.
+///
+/// Returns an error also if the peer has closed connection and we
+/// can't read any more from the socket.
 async fn start_read_loop<R>(reader: &mut R, channel_sender: Sender) -> Result<(), Box<dyn Error>>
 where
     R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,

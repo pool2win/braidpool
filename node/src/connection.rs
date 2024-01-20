@@ -7,6 +7,7 @@ use std::time::SystemTime;
 use std::{error::Error, net::SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
@@ -101,10 +102,19 @@ where
             match message {
                 Ok(message) => {
                     log::debug!("Read message.... {:?}", message.len());
-                    if channel_sender.send(message.freeze()).await.is_err() {
-                        return Err("Error handling received message".into());
+                    match channel_sender.try_send(message.freeze()) {
+                        Ok(_) => {
+                            log::debug!("Message sent on channel...");
+                        }
+                        Err(TrySendError::Full(_)) => {
+                            log::info!("Sender flooding channel");
+                            return Err("Sender flooding channel".into());
+                        }
+                        Err(TrySendError::Closed(_)) => {
+                            log::info!("Receiver closed for channel");
+                            return Err("Receiver closed for channel".into());
+                        }
                     }
-                    log::debug!("Message sent on channel...");
                 }
                 Err(_) => {
                     return Err("Message receive: peer closed connection".into());
@@ -371,6 +381,43 @@ mod tests {
         // then send a message that can't be parsed and results in channel closing
         let _ = sender.send(Bytes::from("hello world")).await;
         let _ = spawn_handle.await;
+        assert_eq!(start_manager.num_connections(), 0);
+    }
+
+    #[tokio::test]
+    async fn it_should_shutdown_connection_if_peer_is_flooding_it() {
+        let _ = env_logger::try_init();
+        let mut writer: Vec<Bytes> = vec![];
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let message = HandshakeMessage::start(&addr).unwrap();
+        let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+        let msg_bytes_2 = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes), Ok(msg_bytes_2)];
+        let mut reader_iter = stream::iter(reader);
+
+        // limit the channel capacity to one message
+        let (sender, mut receiver) = mpsc::channel::<Bytes>(1);
+        let sender_cloned = sender.clone();
+
+        let start_manager = Arc::new(ConnectionManager::new());
+        let start_manager_cloned = start_manager.clone();
+
+        let spawn_handle = tokio::spawn(async move {
+            start(
+                addr,
+                &mut reader_iter,
+                &mut writer,
+                sender_cloned,
+                &mut receiver,
+                start_manager_cloned,
+            )
+            .await;
+        });
+
+        let _ = spawn_handle.await;
+
+        assert!(sender.is_closed());
         assert_eq!(start_manager.num_connections(), 0);
     }
 }

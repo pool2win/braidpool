@@ -112,14 +112,16 @@ where
                         Ok(_) => {
                             log::debug!("Message sent on channel...");
                         }
-                        Err(TrySendError::Full(_)) => {
-                            log::info!("Sender flooding channel");
-                            return Err("Sender flooding channel".into());
-                        }
-                        Err(TrySendError::Closed(_)) => {
-                            log::info!("Receiver closed for channel");
-                            return Err("Receiver closed for channel".into());
-                        }
+                        Err(error) => match error {
+                            TrySendError::Full(_) => {
+                                log::info!("Sender flooding channel");
+                                return Err("Sender flooding channel".into());
+                            }
+                            TrySendError::Closed(_) => {
+                                log::info!("Receiver closed for channel");
+                                return Err("Receiver closed for channel".into());
+                            }
+                        },
                     }
                 }
                 Err(_) => {

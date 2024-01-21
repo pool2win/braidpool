@@ -15,6 +15,8 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate code coverage
         run: cd node && cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+        env:
+          RUST_LOG: debug
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:

@@ -190,12 +190,18 @@ async fn start<R, W>(
     W: SinkExt<Bytes> + Unpin + Send + Sync,
 {
     log::info!("Spawning tasks");
-    manager.insert(
-        addr,
-        Metadata {
-            created_at: SystemTime::now(),
-        },
-    );
+    if manager
+        .insert(
+            addr,
+            Metadata {
+                created_at: SystemTime::now(),
+            },
+        )
+        .is_err()
+    {
+        log::info!("Connection refused - limit reached");
+        return;
+    }
     let message = HandshakeMessage::start(&addr).unwrap();
     let _ = writer.send(message.as_bytes().unwrap()).await;
     tokio::select! {
@@ -229,8 +235,8 @@ mod tests {
         let _ = env_logger::try_init();
 
         // listen and client are from different clients, and therefore we need two different connection managers.
-        let listen_manager = Arc::new(ConnectionManager::new());
-        let connect_manager = Arc::new(ConnectionManager::new());
+        let listen_manager = Arc::new(ConnectionManager::new(3));
+        let connect_manager = Arc::new(ConnectionManager::new(3));
 
         let listen_manager_cloned = listen_manager.clone();
         let connect_manager_cloned = connect_manager.clone();
@@ -368,7 +374,7 @@ mod tests {
         let (sender, mut receiver) = mpsc::channel::<Bytes>(3);
         let sender_cloned = sender.clone();
 
-        let start_manager = Arc::new(ConnectionManager::new());
+        let start_manager = Arc::new(ConnectionManager::new(3));
         let start_manager_cloned = start_manager.clone();
 
         let spawn_handle = tokio::spawn(async move {
@@ -408,7 +414,7 @@ mod tests {
         let (sender, mut receiver) = mpsc::channel::<Bytes>(1);
         let sender_cloned = sender.clone();
 
-        let start_manager = Arc::new(ConnectionManager::new());
+        let start_manager = Arc::new(ConnectionManager::new(3));
         let start_manager_cloned = start_manager.clone();
 
         let spawn_handle = tokio::spawn(async move {

@@ -42,7 +42,7 @@ mod tests {
 
     #[test]
     fn it_matches_start_message_for_handshake() {
-        let addr = SocketAddr::from_str("127.0.0.1:25188").unwrap();
+        let addr = SocketAddr::from_str("127.0.0.1:6680").unwrap();
         let start_message = HandshakeMessage::start(&addr).unwrap();
         assert_eq!(
             start_message,
@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn it_matches_response_message_for_correct_handshake_start() {
-        let addr = SocketAddr::from_str("127.0.0.1:25188").unwrap();
+        let addr = SocketAddr::from_str("127.0.0.1:6680").unwrap();
         let start_message = HandshakeMessage::start(&addr).unwrap();
         let response = start_message.response_for_received().unwrap();
         assert_eq!(

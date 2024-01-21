@@ -242,13 +242,13 @@ mod tests {
         let connect_manager_cloned = connect_manager.clone();
 
         tokio::spawn(async move {
-            start_listen("localhost:25188".to_string(), listen_manager_cloned).await;
+            start_listen("localhost:6680".to_string(), listen_manager_cloned).await;
         });
 
         // TODO: Fix this smoke test! Kill the sleep in this smoke test.
         sleep(Duration::from_millis(100)).await;
 
-        let _ = connect("localhost:25188".to_string(), connect_manager_cloned).await;
+        let _ = connect("localhost:6680".to_string(), connect_manager_cloned).await;
 
         assert_eq!(listen_manager.num_connections(), 1);
         assert_eq!(connect_manager.num_connections(), 1);

@@ -45,11 +45,11 @@ the usual cargo things
 cd node
 cargo build
 
-# run the first seed node on port 8989
-cargo run localhost:8989 localhost:8989 
+# run the first seed node on port 6680
+cargo run --bind=localhost:6680
 
-# run other nodes pointing to the seeding node and specify their own port as 9899
-cargo run localhost:8989 localhost:9899
+# run other nodes pointing to the seeding node and specify their own port as 6680
+cargo run --bind=localhost:6680 --addpeer=localhost:6680
 ```
 
 # Progress

@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn it_matches_start_message_for_ping() {
-        let addr = SocketAddr::from_str("127.0.0.1:25188").unwrap();
+        let addr = SocketAddr::from_str("127.0.0.1:6680").unwrap();
         let start_message = PingMessage::start(&addr).unwrap();
         assert_eq!(
             start_message,

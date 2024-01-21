@@ -31,15 +31,15 @@ mod tests {
 
     #[test]
     fn it_matches_start_message_for_handshake() {
-        let addr = SocketAddr::from_str("127.0.0.1:25188").unwrap();
+        let addr = SocketAddr::from_str("127.0.0.1:6680").unwrap();
         if let Some(Message::Heartbeat(start_message)) = HeartbeatMessage::start(&addr) {
-            assert_eq!(start_message.from, String::from("127.0.0.1:25188"))
+            assert_eq!(start_message.from, String::from("127.0.0.1:6680"))
         }
     }
 
     #[test]
     fn it_matches_response_message_for_correct_handshake_start() {
-        let addr = SocketAddr::from_str("127.0.0.1:25188").unwrap();
+        let addr = SocketAddr::from_str("127.0.0.1:6680").unwrap();
         let start_message = HeartbeatMessage::start(&addr).unwrap();
         let response = start_message.response_for_received().unwrap();
         assert_eq!(response, None);

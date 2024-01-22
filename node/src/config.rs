@@ -3,27 +3,61 @@ use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
 
-#[derive(Default, Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug, PartialEq)]
 pub struct Config {
-    network: NetworkConfig,
-    peer: PeerConfig,
+    network: Option<NetworkConfig>,
+    peer: Option<PeerConfig>,
 }
 
-#[derive(Default, Deserialize, Debug, PartialEq)]
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            network: Some(NetworkConfig::default()),
+            peer: Some(PeerConfig::default()),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
 pub struct NetworkConfig {
-    bind: String,
-    port: i16,
+    bind: Option<String>,
+    port: Option<i16>,
 }
 
-#[derive(Default, Deserialize, Debug, PartialEq)]
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        NetworkConfig {
+            bind: Some("localhost".to_string()),
+            port: Some(6680),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
 pub struct PeerConfig {
-    pub seeds: Vec<String>,
-    pub max_peer_count: i16,
-    pub max_pending_messages: i16,
+    pub seeds: Option<Vec<String>>,
+    pub max_peer_count: Option<i16>,
+    pub max_pending_messages: Option<i16>,
+}
+
+impl Default for PeerConfig {
+    fn default() -> Self {
+        PeerConfig {
+            seeds: None,
+            max_peer_count: Some(10),
+            max_pending_messages: Some(32),
+        }
+    }
 }
 
 pub fn load_config_from_file(path: String) -> Option<Config> {
-    let contents = read_file(path).unwrap();
+    match read_file(path) {
+        Err(_) => Some(Config::default()),
+        Ok(contents) => parse_config_from_string(contents),
+    }
+}
+
+fn parse_config_from_string(contents: String) -> Option<Config> {
     let config = toml::from_str(&contents);
     match config {
         Ok(config) => config,
@@ -46,21 +80,85 @@ mod tests {
     use super::*;
 
     #[test]
+    fn it_should_load_default_config_correctly() {
+        let _ = env_logger::try_init();
+        let conf = Config::default();
+        let network = conf.network.unwrap();
+        let peer = conf.peer.unwrap();
+        assert_eq!(network.bind, Some("localhost".to_string()));
+        assert_eq!(network.port, Some(6680));
+        assert!(peer.seeds.is_none());
+        assert_eq!(peer.max_peer_count, Some(10));
+        assert_eq!(peer.max_pending_messages, Some(32));
+    }
+
+    #[test]
+    fn it_should_load_empty_config_for_empty_string() {
+        let _ = env_logger::try_init();
+        let conf = parse_config_from_string(r#""#.to_string()).unwrap();
+        assert!(conf.network.is_none());
+        assert!(conf.peer.is_none());
+    }
+
+    #[test]
+    fn it_should_load_default_for_missing_fields() {
+        let _ = env_logger::try_init();
+        let conf = parse_config_from_string(
+            r#"
+[network]
+bind="localhost""#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(conf.network.is_some());
+        assert_eq!(conf.network.unwrap().bind, Some("localhost".to_string()));
+        assert!(conf.peer.is_none());
+    }
+
+    #[test]
+    fn it_should_load_default_for_missing_fields_in_multiple_sections() {
+        let _ = env_logger::try_init();
+        let conf = parse_config_from_string(
+            r#"
+[network]
+bind="localhost"
+[peer]
+max_peer_count = 100"#
+                .to_string(),
+        )
+        .unwrap();
+        assert!(conf.network.is_some());
+        assert_eq!(conf.network.unwrap().bind, Some("localhost".to_string()));
+        let peer = conf.peer.unwrap();
+        assert!(peer.seeds.is_none());
+        assert_eq!(peer.max_peer_count.unwrap(), 100);
+        assert!(peer.max_pending_messages.is_none());
+    }
+
+    #[test]
     fn it_should_load_config_without_errors() {
         let _ = env_logger::try_init();
         let conf = load_config_from_file("config.toml".to_string()).unwrap();
-        assert_eq!(conf.network.bind, "localhost");
-        assert_eq!(conf.network.port, 6680);
-        assert_eq!(conf.peer.seeds, vec!["localhost:6681"]);
-        assert_eq!(conf.peer.max_peer_count, 10);
-        assert_eq!(conf.peer.max_pending_messages, 32);
+        let network = conf.network.unwrap();
+        let peer = conf.peer.unwrap();
+        assert_eq!(network.bind.unwrap(), "localhost");
+        assert_eq!(network.port.unwrap(), 6680);
+        assert_eq!(peer.seeds, Some(vec!["localhost:6681".to_string()]));
+        assert_eq!(peer.max_peer_count.unwrap(), 10);
+        assert_eq!(peer.max_pending_messages.unwrap(), 32);
     }
 
-    // #[test]
-    // fn it_should_load_config_without_errors() {
-    //     let _ = env_logger::try_init();
-    //     let conf = load_config_from_file("config.toml".to_string()).unwrap();
-    //     assert_eq!(conf.network.bind, "localhost");
-    //     assert_eq!(conf.network.port, 6680);
-    // }
+    #[test]
+    fn it_should_load_default_config_when_file_not_found() {
+        let _ = env_logger::try_init();
+        let conf = load_config_from_file("no_such_file.toml".to_string()).unwrap();
+        let network = conf.network.unwrap();
+        let peer = conf.peer.unwrap();
+
+        assert_eq!(network.bind.unwrap(), "localhost");
+        assert_eq!(network.port.unwrap(), 6680);
+        assert!(peer.seeds.is_none());
+        assert_eq!(peer.max_peer_count.unwrap(), 10);
+        assert_eq!(peer.max_pending_messages.unwrap(), 32);
+    }
 }

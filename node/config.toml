@@ -10,7 +10,7 @@ port = 6680
 [peer]
 
 # Initial peers to connect to
-seeds = ["localhost:6681"]
+seeds = []
 
 # Maximum number of peers to connect to
 max_peer_count = 10

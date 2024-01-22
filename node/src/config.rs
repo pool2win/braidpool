@@ -5,8 +5,8 @@ use std::io::prelude::*;
 
 #[derive(Deserialize, Debug, PartialEq)]
 pub struct Config {
-    network: Option<NetworkConfig>,
-    peer: Option<PeerConfig>,
+    pub network: Option<NetworkConfig>,
+    pub peer: Option<PeerConfig>,
 }
 
 impl Default for Config {
@@ -20,8 +20,8 @@ impl Default for Config {
 
 #[derive(Deserialize, Debug, PartialEq)]
 pub struct NetworkConfig {
-    bind: Option<String>,
-    port: Option<i16>,
+    pub bind: Option<String>,
+    pub port: Option<usize>,
 }
 
 impl Default for NetworkConfig {
@@ -36,8 +36,8 @@ impl Default for NetworkConfig {
 #[derive(Deserialize, Debug, PartialEq)]
 pub struct PeerConfig {
     pub seeds: Option<Vec<String>>,
-    pub max_peer_count: Option<i16>,
-    pub max_pending_messages: Option<i16>,
+    pub max_peer_count: Option<usize>,
+    pub max_pending_messages: Option<usize>,
 }
 
 impl Default for PeerConfig {
@@ -123,14 +123,15 @@ bind="localhost""#
 [network]
 bind="localhost"
 [peer]
-max_peer_count = 100"#
+max_peer_count = 100
+seeds = ["1.2.3.4:8080"]"#
                 .to_string(),
         )
         .unwrap();
         assert!(conf.network.is_some());
         assert_eq!(conf.network.unwrap().bind, Some("localhost".to_string()));
         let peer = conf.peer.unwrap();
-        assert!(peer.seeds.is_none());
+        assert_eq!(peer.seeds, Some(vec!["1.2.3.4:8080".to_string()]));
         assert_eq!(peer.max_peer_count.unwrap(), 100);
         assert!(peer.max_pending_messages.is_none());
     }
@@ -143,7 +144,8 @@ max_peer_count = 100"#
         let peer = conf.peer.unwrap();
         assert_eq!(network.bind.unwrap(), "localhost");
         assert_eq!(network.port.unwrap(), 6680);
-        assert_eq!(peer.seeds, Some(vec!["localhost:6681".to_string()]));
+        assert!(peer.seeds.is_some());
+        assert_eq!(peer.seeds.unwrap().len(), 0);
         assert_eq!(peer.max_peer_count.unwrap(), 10);
         assert_eq!(peer.max_pending_messages.unwrap(), 32);
     }

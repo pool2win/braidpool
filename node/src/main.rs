@@ -9,27 +9,39 @@ mod connection_manager;
 mod protocol;
 
 use crate::connection_manager::ConnectionManager;
-const CONNECTION_LIMIT: usize = 32;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = cli::Cli::parse();
 
-    let datadir = args.datadir;
-    log::info!("Using braid data directory: {}", datadir.display());
+    let config = config::load_config_from_file(args.config_file).unwrap();
+    let network_config = config.network.unwrap();
+    let peer_config = config.peer.unwrap();
 
     setup_logging()?;
     setup_tracing()?;
 
-    let manager = Arc::new(ConnectionManager::new(CONNECTION_LIMIT));
+    let manager = Arc::new(ConnectionManager::new(peer_config.max_peer_count.unwrap()));
 
-    if let Some(addpeer) = args.addpeer {
-        for peer in addpeer {
-            connection::connect(peer, manager.clone());
+    if let Some(seeds) = peer_config.seeds {
+        for seed in seeds {
+            connection::connect(
+                seed,
+                manager.clone(),
+                peer_config.max_pending_messages.unwrap(),
+            );
         }
     }
 
-    connection::start_listen(args.bind, manager.clone()).await;
+    let mut bind_address = network_config.bind.unwrap();
+    bind_address.push(':');
+    bind_address.push_str(network_config.port.unwrap().to_string().as_str());
+    connection::start_listen(
+        bind_address,
+        manager.clone(),
+        peer_config.max_pending_messages.unwrap(),
+    )
+    .await;
     log::debug!("Listen done");
     Ok(())
 }

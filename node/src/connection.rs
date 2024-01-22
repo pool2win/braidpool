@@ -15,8 +15,6 @@ use crate::connection_manager::ConnectionManager;
 use crate::connection_manager::Metadata;
 use crate::protocol::{self, HandshakeMessage, ProtocolMessage};
 
-const CHANNEL_CAPACITY: usize = 32;
-
 type Sender = mpsc::Sender<Bytes>;
 type Receiver = mpsc::Receiver<Bytes>;
 
@@ -30,11 +28,12 @@ async fn start_connection(
     stream: TcpStream,
     addr: SocketAddr,
     manager: Arc<ConnectionManager>,
+    max_pending_messages: usize,
 ) -> JoinHandle<()> {
     let (r, w) = stream.into_split();
     let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
     let mut framed_writer = FramedWrite::new(w, LengthDelimitedCodec::new());
-    let (sender, mut receiver) = mpsc::channel::<Bytes>(CHANNEL_CAPACITY);
+    let (sender, mut receiver) = mpsc::channel::<Bytes>(max_pending_messages);
     tokio::spawn(async move {
         start(
             addr,
@@ -50,7 +49,11 @@ async fn start_connection(
 
 /// Connect to a peer.
 /// Each new connect spawns two new task from `start`.
-pub fn connect(peer: String, manager: Arc<ConnectionManager>) -> JoinHandle<()> {
+pub fn connect(
+    peer: String,
+    manager: Arc<ConnectionManager>,
+    max_pending_messages: usize,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         log::info!("Connecting to peer: {:?}", peer);
         let stream = TcpStream::connect(peer.as_str())
@@ -58,7 +61,7 @@ pub fn connect(peer: String, manager: Arc<ConnectionManager>) -> JoinHandle<()> 
             .expect("Error connecting to peer");
         if let Ok(addr_iter) = peer.to_socket_addrs() {
             if let Some(addr) = addr_iter.into_iter().next() {
-                start_connection(stream, addr, manager).await;
+                start_connection(stream, addr, manager, max_pending_messages).await;
             }
         }
     })
@@ -68,7 +71,11 @@ pub fn connect(peer: String, manager: Arc<ConnectionManager>) -> JoinHandle<()> 
 ///
 /// addr is of the form "host:port".
 /// Each new accept returns spawns two new task using `start_connection`.
-pub async fn start_listen(addr: String, manager: Arc<ConnectionManager>) {
+pub async fn start_listen(
+    addr: String,
+    manager: Arc<ConnectionManager>,
+    max_pending_messages: usize,
+) {
     log::info!("Binding to {}", addr);
     match TcpListener::bind(addr).await {
         Ok(listener) => {
@@ -78,7 +85,13 @@ pub async fn start_listen(addr: String, manager: Arc<ConnectionManager>) {
                 match listener.accept().await {
                     Ok((stream, peer_address)) => {
                         log::info!("Accepted connection from {:?}", peer_address);
-                        start_connection(stream, peer_address, manager.clone()).await;
+                        start_connection(
+                            stream,
+                            peer_address,
+                            manager.clone(),
+                            max_pending_messages,
+                        )
+                        .await;
                     }
                     Err(e) => log::error!("Couldn't get client on accept: {:?}", e),
                 }
@@ -242,13 +255,13 @@ mod tests {
         let connect_manager_cloned = connect_manager.clone();
 
         tokio::spawn(async move {
-            start_listen("localhost:6680".to_string(), listen_manager_cloned).await;
+            start_listen("localhost:6680".to_string(), listen_manager_cloned, 32).await;
         });
 
         // TODO: Fix this smoke test! Kill the sleep in this smoke test.
         sleep(Duration::from_millis(100)).await;
 
-        let _ = connect("localhost:6680".to_string(), connect_manager_cloned).await;
+        let _ = connect("localhost:6680".to_string(), connect_manager_cloned, 32).await;
 
         assert_eq!(listen_manager.num_connections(), 1);
         assert_eq!(connect_manager.num_connections(), 1);

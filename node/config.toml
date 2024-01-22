@@ -1,0 +1,20 @@
+
+[network]
+
+# Local address to listen on
+bind = "localhost"
+
+# Local port to listen on
+port = 6680
+
+[peer]
+
+# Initial peers to connect to
+seeds = ["localhost:6681"]
+
+# Maximum number of peers to connect to
+max_peer_count = 10
+
+# Number of unhandled messages that are kept waiting in a buffer
+max_pending_messages = 32
+

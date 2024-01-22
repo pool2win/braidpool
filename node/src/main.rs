@@ -3,6 +3,7 @@ use std::error::Error;
 use std::sync::Arc;
 
 mod cli;
+mod config;
 mod connection;
 mod connection_manager;
 mod protocol;

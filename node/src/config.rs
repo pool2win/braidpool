@@ -101,6 +101,12 @@ mod tests {
     }
 
     #[test]
+    fn it_should_return_error_for_bad_toml() {
+        let _ = env_logger::try_init();
+        assert!(parse_config_from_string(r#"abcd"#.to_string()).is_none());
+    }
+
+    #[test]
     fn it_should_load_default_for_missing_fields() {
         let _ = env_logger::try_init();
         let conf = parse_config_from_string(

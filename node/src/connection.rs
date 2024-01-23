@@ -14,9 +14,12 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use crate::connection_manager::ConnectionManager;
 use crate::connection_manager::Metadata;
 use crate::protocol::{self, HandshakeMessage, ProtocolMessage};
+use tokio::sync::broadcast;
 
 type Sender = mpsc::Sender<Bytes>;
 type Receiver = mpsc::Receiver<Bytes>;
+type SendToAllSender = broadcast::Sender<Bytes>;
+type SendToAllReceiver = broadcast::Receiver<Bytes>;
 
 /// Split provided stream, create an internal channel and spawn tasks
 /// to use the reader, writer, and channel sender, receiver.
@@ -29,6 +32,7 @@ async fn start_connection(
     addr: SocketAddr,
     manager: Arc<ConnectionManager>,
     max_pending_messages: usize,
+    send_to_all_receiver: SendToAllReceiver,
 ) -> JoinHandle<()> {
     let (r, w) = stream.into_split();
     let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
@@ -42,6 +46,7 @@ async fn start_connection(
             sender,
             &mut receiver,
             manager,
+            send_to_all_receiver,
         )
         .await;
     })
@@ -53,6 +58,7 @@ pub fn connect(
     peer: String,
     manager: Arc<ConnectionManager>,
     max_pending_messages: usize,
+    send_to_all_receiver: SendToAllReceiver,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         log::info!("Connecting to peer: {:?}", peer);
@@ -61,7 +67,14 @@ pub fn connect(
             .expect("Error connecting to peer");
         if let Ok(addr_iter) = peer.to_socket_addrs() {
             if let Some(addr) = addr_iter.into_iter().next() {
-                start_connection(stream, addr, manager, max_pending_messages).await;
+                start_connection(
+                    stream,
+                    addr,
+                    manager,
+                    max_pending_messages,
+                    send_to_all_receiver,
+                )
+                .await;
             }
         }
     })
@@ -75,6 +88,7 @@ pub async fn start_listen(
     addr: String,
     manager: Arc<ConnectionManager>,
     max_pending_messages: usize,
+    send_to_all: SendToAllSender,
 ) {
     log::info!("Binding to {}", addr);
     match TcpListener::bind(addr).await {
@@ -90,6 +104,7 @@ pub async fn start_listen(
                             peer_address,
                             manager.clone(),
                             max_pending_messages,
+                            send_to_all.subscribe(),
                         )
                         .await;
                     }
@@ -154,36 +169,55 @@ where
 async fn start_message_handler<W>(
     writer: &mut W,
     channel_receiver: &mut Receiver,
+    mut send_to_all_receiver: SendToAllReceiver,
 ) -> Result<(), Box<dyn Error>>
 where
     W: SinkExt<Bytes> + Unpin + Sync + Send,
 {
-    while let Some(msg) = channel_receiver.recv().await {
-        log::info!("Received message");
-        let message: protocol::Message;
-        if let Ok(msg) = protocol::Message::from_bytes(&msg) {
-            message = msg;
-        } else {
-            return Err("Error parsing message".into());
+    tokio::select! {
+        Some(msg) = channel_receiver.recv() => {
+            log::debug!("Received: {:?}", msg);
+            if handle_received(writer, msg).await.is_err() {
+                return Err("Message handling failure: Closing peer connection".into());
+            }
+        },
+        Ok(msg_bytes) = send_to_all_receiver.recv() => {
+            if writer.send(msg_bytes).await.is_err() {
+                return Err("Send failed: Closing peer connection".into());
+            }
         }
-        match message.response_for_received() {
-            Ok(result) => {
-                if let Some(response) = result {
-                    if let Some(to_send) = response.as_bytes() {
-                        if (writer.send(to_send).await).is_err() {
-                            return Err("Send failed: Closing peer connection".into());
-                        }
-                    } else {
-                        return Err("Error serializing: Closing peer connection".into());
+    };
+    log::debug!("returning from start message handler...");
+    Ok(())
+}
+
+async fn handle_received<W>(writer: &mut W, msg: Bytes) -> Result<(), Box<dyn Error>>
+where
+    W: SinkExt<Bytes> + Unpin + Sync + Send,
+{
+    let message: protocol::Message;
+    if let Ok(msg) = protocol::Message::from_bytes(&msg) {
+        message = msg;
+    } else {
+        return Err("Error parsing message".into());
+    }
+    // TODO: These nesting of unwraps is not good. We should get rid of the nesting.
+    match message.response_for_received() {
+        Ok(result) => {
+            if let Some(response) = result {
+                if let Some(to_send) = response.as_bytes() {
+                    if (writer.send(to_send).await).is_err() {
+                        return Err("Send failed: Closing peer connection".into());
                     }
+                } else {
+                    return Err("Error serializing: Closing peer connection".into());
                 }
             }
-            Err(_) => {
-                return Err("Error constructing response: Closing peer connection".into());
-            }
+        }
+        Err(_) => {
+            return Err("Error constructing response: Closing peer connection".into());
         }
     }
-    log::debug!("returning from start message handler...");
     Ok(())
 }
 
@@ -198,6 +232,7 @@ async fn start<R, W>(
     channel_sender: Sender,
     channel_receiver: &mut Receiver,
     manager: Arc<ConnectionManager>,
+    send_to_all_receiver: SendToAllReceiver,
 ) where
     R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
     W: SinkExt<Bytes> + Unpin + Send + Sync,
@@ -222,7 +257,7 @@ async fn start<R, W>(
             log::debug!("Read loop returned: Closing connection to {:?}", addr);
             channel_receiver.close();
         }
-        _ = start_message_handler(writer, channel_receiver) => {
+        _ = start_message_handler(writer, channel_receiver, send_to_all_receiver) => {
             log::debug!("Message handler returned: Closing connection to {:?}", addr);
             channel_receiver.close();
         }
@@ -254,14 +289,28 @@ mod tests {
         let listen_manager_cloned = listen_manager.clone();
         let connect_manager_cloned = connect_manager.clone();
 
+        let (send_to_all_tx, send_to_all_rx) = broadcast::channel::<Bytes>(32);
+
         tokio::spawn(async move {
-            start_listen("localhost:6680".to_string(), listen_manager_cloned, 32).await;
+            start_listen(
+                "localhost:6680".to_string(),
+                listen_manager_cloned,
+                32,
+                send_to_all_tx,
+            )
+            .await;
         });
 
         // TODO: Fix this smoke test! Kill the sleep in this smoke test.
         sleep(Duration::from_millis(100)).await;
 
-        let _ = connect("localhost:6680".to_string(), connect_manager_cloned, 32).await;
+        let _ = connect(
+            "localhost:6680".to_string(),
+            connect_manager_cloned,
+            32,
+            send_to_all_rx,
+        )
+        .await;
 
         assert_eq!(listen_manager.num_connections(), 1);
         assert_eq!(connect_manager.num_connections(), 1);
@@ -356,9 +405,10 @@ mod tests {
         let mut _reader_iter = stream::iter(reader);
 
         let (sender, mut receiver) = mpsc::channel::<Bytes>(3);
+        let (_, send_to_all_rx) = broadcast::channel::<Bytes>(32);
 
         let spawn_handle = tokio::spawn(async move {
-            let r = start_message_handler(&mut writer, &mut receiver).await;
+            let r = start_message_handler(&mut writer, &mut receiver, send_to_all_rx).await;
             assert_eq!(
                 r.unwrap_err().to_string(),
                 "Error parsing message".to_string()
@@ -390,6 +440,8 @@ mod tests {
         let start_manager = Arc::new(ConnectionManager::new(3));
         let start_manager_cloned = start_manager.clone();
 
+        let (_, send_to_all_rx) = broadcast::channel::<Bytes>(32);
+
         let spawn_handle = tokio::spawn(async move {
             start(
                 addr,
@@ -398,6 +450,7 @@ mod tests {
                 sender_cloned,
                 &mut receiver,
                 start_manager_cloned,
+                send_to_all_rx,
             )
             .await;
         });
@@ -430,6 +483,8 @@ mod tests {
         let start_manager = Arc::new(ConnectionManager::new(3));
         let start_manager_cloned = start_manager.clone();
 
+        let (_, send_to_all_rx) = broadcast::channel::<Bytes>(32);
+
         let spawn_handle = tokio::spawn(async move {
             start(
                 addr,
@@ -438,6 +493,7 @@ mod tests {
                 sender_cloned,
                 &mut receiver,
                 start_manager_cloned,
+                send_to_all_rx,
             )
             .await;
         });

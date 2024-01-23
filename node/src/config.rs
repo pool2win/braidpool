@@ -38,6 +38,7 @@ pub struct PeerConfig {
     pub seeds: Option<Vec<String>>,
     pub max_peer_count: Option<usize>,
     pub max_pending_messages: Option<usize>,
+    pub max_pending_send_to_all: Option<usize>,
 }
 
 impl Default for PeerConfig {
@@ -46,6 +47,7 @@ impl Default for PeerConfig {
             seeds: None,
             max_peer_count: Some(10),
             max_pending_messages: Some(32),
+            max_pending_send_to_all: Some(128),
         }
     }
 }
@@ -90,6 +92,7 @@ mod tests {
         assert!(peer.seeds.is_none());
         assert_eq!(peer.max_peer_count, Some(10));
         assert_eq!(peer.max_pending_messages, Some(32));
+        assert_eq!(peer.max_pending_send_to_all, Some(128));
     }
 
     #[test]
@@ -140,6 +143,7 @@ seeds = ["1.2.3.4:8080"]"#
         assert_eq!(peer.seeds, Some(vec!["1.2.3.4:8080".to_string()]));
         assert_eq!(peer.max_peer_count.unwrap(), 100);
         assert!(peer.max_pending_messages.is_none());
+        assert!(peer.max_pending_send_to_all.is_none());
     }
 
     #[test]
@@ -154,6 +158,7 @@ seeds = ["1.2.3.4:8080"]"#
         assert_eq!(peer.seeds.unwrap().len(), 0);
         assert_eq!(peer.max_peer_count.unwrap(), 10);
         assert_eq!(peer.max_pending_messages.unwrap(), 32);
+        assert_eq!(peer.max_pending_send_to_all.unwrap(), 128);
     }
 
     #[test]
@@ -168,5 +173,6 @@ seeds = ["1.2.3.4:8080"]"#
         assert!(peer.seeds.is_none());
         assert_eq!(peer.max_peer_count.unwrap(), 10);
         assert_eq!(peer.max_pending_messages.unwrap(), 32);
+        assert_eq!(peer.max_pending_send_to_all.unwrap(), 128);
     }
 }

@@ -18,3 +18,5 @@ max_peer_count = 10
 # Number of unhandled messages that are kept waiting in a buffer
 max_pending_messages = 32
 
+# Number of messages waiting to be sent to all peers
+max_pending_send_to_all = 128

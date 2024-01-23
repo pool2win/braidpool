@@ -1,6 +1,8 @@
+use bytes::Bytes;
 use clap::Parser;
 use std::error::Error;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 
 mod cli;
 mod config;
@@ -23,12 +25,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let manager = Arc::new(ConnectionManager::new(peer_config.max_peer_count.unwrap()));
 
+    let (send_to_all_tx, _) =
+        broadcast::channel::<Bytes>(peer_config.max_pending_send_to_all.unwrap());
+
     if let Some(seeds) = peer_config.seeds {
         for seed in seeds {
+            let send_to_all_rx = send_to_all_tx.subscribe();
             connection::connect(
                 seed,
                 manager.clone(),
                 peer_config.max_pending_messages.unwrap(),
+                send_to_all_rx,
             );
         }
     }
@@ -40,6 +47,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         bind_address,
         manager.clone(),
         peer_config.max_pending_messages.unwrap(),
+        send_to_all_tx,
     )
     .await;
     log::debug!("Listen done");

@@ -77,6 +77,14 @@ fn read_file(path: String) -> Result<String, Box<dyn Error>> {
     Ok(contents)
 }
 
+/// Build the bind address from network config
+pub fn get_bind_address(network_config: NetworkConfig) -> String {
+    let mut bind_address = network_config.bind.unwrap();
+    bind_address.push(':');
+    bind_address.push_str(network_config.port.unwrap().to_string().as_str());
+    bind_address
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +182,13 @@ seeds = ["1.2.3.4:8080"]"#
         assert_eq!(peer.max_peer_count.unwrap(), 10);
         assert_eq!(peer.max_pending_messages.unwrap(), 32);
         assert_eq!(peer.max_pending_send_to_all.unwrap(), 128);
+    }
+
+    #[test]
+    fn it_should_get_bind_address_from_config() {
+        let _ = env_logger::try_init();
+        let conf = load_config_from_file("config.toml".to_string()).unwrap();
+        let network = conf.network.unwrap();
+        assert_eq!(get_bind_address(network), "localhost:6680");
     }
 }

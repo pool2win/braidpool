@@ -40,9 +40,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let mut bind_address = network_config.bind.unwrap();
-    bind_address.push(':');
-    bind_address.push_str(network_config.port.unwrap().to_string().as_str());
+    let bind_address = config::get_bind_address(network_config);
     connection::start_listen(
         bind_address,
         manager.clone(),

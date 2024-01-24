@@ -3,12 +3,15 @@ use futures::{SinkExt, StreamExt};
 use std::marker::Unpin;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::{error::Error, net::SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
+use tokio::time;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use crate::connection_manager::ConnectionManager;
@@ -33,6 +36,7 @@ async fn start_connection(
     manager: Arc<ConnectionManager>,
     max_pending_messages: usize,
     send_to_all_receiver: SendToAllReceiver,
+    notifier: Arc<Notify>,
 ) -> JoinHandle<()> {
     let (r, w) = stream.into_split();
     let mut framed_reader = FramedRead::new(r, LengthDelimitedCodec::new());
@@ -47,6 +51,7 @@ async fn start_connection(
             &mut receiver,
             manager,
             send_to_all_receiver,
+            notifier,
         )
         .await;
     })
@@ -59,6 +64,7 @@ pub fn connect(
     manager: Arc<ConnectionManager>,
     max_pending_messages: usize,
     send_to_all_receiver: SendToAllReceiver,
+    notifier: Arc<Notify>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         log::info!("Connecting to peer: {:?}", peer);
@@ -73,6 +79,7 @@ pub fn connect(
                     manager,
                     max_pending_messages,
                     send_to_all_receiver,
+                    notifier,
                 )
                 .await;
             }
@@ -89,6 +96,7 @@ pub async fn start_listen(
     manager: Arc<ConnectionManager>,
     max_pending_messages: usize,
     send_to_all: SendToAllSender,
+    notifier: Arc<Notify>,
 ) {
     log::info!("Binding to {}", addr);
     match TcpListener::bind(addr).await {
@@ -105,6 +113,7 @@ pub async fn start_listen(
                             manager.clone(),
                             max_pending_messages,
                             send_to_all.subscribe(),
+                            notifier.clone(),
                         )
                         .await;
                     }
@@ -170,25 +179,27 @@ async fn start_message_handler<W>(
     writer: &mut W,
     channel_receiver: &mut Receiver,
     mut send_to_all_receiver: SendToAllReceiver,
+    notifier: Arc<Notify>,
 ) -> Result<(), Box<dyn Error>>
 where
     W: SinkExt<Bytes> + Unpin + Sync + Send,
 {
-    tokio::select! {
-        Some(msg) = channel_receiver.recv() => {
-            log::debug!("Received: {:?}", msg);
-            if handle_received(writer, msg).await.is_err() {
-                return Err("Message handling failure: Closing peer connection".into());
+    loop {
+        tokio::select! {
+            Some(msg) = channel_receiver.recv() => {
+                if handle_received(writer, msg).await.is_err() {
+                    return Err("Message handling failure: Closing peer connection".into());
+                } else {
+                    notifier.notified();
+                }
+            },
+            Ok(msg_bytes) = send_to_all_receiver.recv() => {
+                if writer.send(msg_bytes).await.is_err() {
+                    return Err("Send failed: Closing peer connection".into());
+                }
             }
-        },
-        Ok(msg_bytes) = send_to_all_receiver.recv() => {
-            if writer.send(msg_bytes).await.is_err() {
-                return Err("Send failed: Closing peer connection".into());
-            }
-        }
-    };
-    log::debug!("returning from start message handler...");
-    Ok(())
+        };
+    }
 }
 
 async fn handle_received<W>(writer: &mut W, msg: Bytes) -> Result<(), Box<dyn Error>>
@@ -233,6 +244,7 @@ async fn start<R, W>(
     channel_receiver: &mut Receiver,
     manager: Arc<ConnectionManager>,
     send_to_all_receiver: SendToAllReceiver,
+    notifier: Arc<Notify>,
 ) where
     R: StreamExt<Item = Result<BytesMut, std::io::Error>> + Unpin,
     W: SinkExt<Bytes> + Unpin + Send + Sync,
@@ -257,7 +269,7 @@ async fn start<R, W>(
             log::debug!("Read loop returned: Closing connection to {:?}", addr);
             channel_receiver.close();
         }
-        _ = start_message_handler(writer, channel_receiver, send_to_all_receiver) => {
+        _ = start_message_handler(writer, channel_receiver, send_to_all_receiver, notifier) => {
             log::debug!("Message handler returned: Closing connection to {:?}", addr);
             channel_receiver.close();
         }
@@ -265,6 +277,42 @@ async fn start<R, W>(
     // Cleanup - first close tcpstream, then remove from connection manager
     let _ = writer.close().await;
     manager.remove(&addr);
+}
+
+/// Start a task to send heartbeats every given duration period.
+///
+/// Heartbeats are set back when certain message types are sent.
+pub async fn start_heartbeat(
+    addr: String,
+    duration: u64,
+    sender: broadcast::Sender<Bytes>,
+    manager: Arc<ConnectionManager>,
+) -> Arc<Notify> {
+    log::debug!("Socket address {:?}", addr);
+    let socket_addr: SocketAddr = addr.to_socket_addrs().unwrap().next().unwrap();
+    let message = protocol::HeartbeatMessage::start(&socket_addr)
+        .unwrap()
+        .as_bytes()
+        .unwrap();
+    let mut interval = time::interval(Duration::from_millis(duration));
+    let notify = Arc::new(Notify::new());
+    let notify_from_others = notify.clone();
+
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if manager.num_connections() > 0 {
+                        sender.send(message.clone()).expect("Error sending heartbeat. Quitting.");
+                    }
+                }
+                _ = notify.notified() => {
+                    interval.reset();
+                }
+            }
+        }
+    });
+    notify_from_others
 }
 
 #[cfg(test)]
@@ -297,6 +345,7 @@ mod tests {
                 listen_manager_cloned,
                 32,
                 send_to_all_tx,
+                Arc::new(Notify::new()),
             )
             .await;
         });
@@ -309,6 +358,7 @@ mod tests {
             connect_manager_cloned,
             32,
             send_to_all_rx,
+            Arc::new(Notify::new()),
         )
         .await;
 
@@ -408,7 +458,13 @@ mod tests {
         let (_, send_to_all_rx) = broadcast::channel::<Bytes>(32);
 
         let spawn_handle = tokio::spawn(async move {
-            let r = start_message_handler(&mut writer, &mut receiver, send_to_all_rx).await;
+            let r = start_message_handler(
+                &mut writer,
+                &mut receiver,
+                send_to_all_rx,
+                Arc::new(Notify::new()),
+            )
+            .await;
             assert_eq!(
                 r.unwrap_err().to_string(),
                 "Error parsing message".to_string()
@@ -451,6 +507,7 @@ mod tests {
                 &mut receiver,
                 start_manager_cloned,
                 send_to_all_rx,
+                Arc::new(Notify::new()),
             )
             .await;
         });
@@ -494,6 +551,7 @@ mod tests {
                 &mut receiver,
                 start_manager_cloned,
                 send_to_all_rx,
+                Arc::new(Notify::new()),
             )
             .await;
         });

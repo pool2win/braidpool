@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let connect_broadcast_sender = send_to_all_tx.clone();
     let listen_broadcast_sender = send_to_all_tx.clone();
 
-    let reset_notifier = connection::start_heartbeat(
+    let (reset_notifier, _) = connection::start_heartbeat(
         bind_address.clone(),
         peer_config.heartbeat_interval.unwrap(),
         send_to_all_tx,

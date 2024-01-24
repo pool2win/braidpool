@@ -287,7 +287,7 @@ pub async fn start_heartbeat(
     duration: u64,
     sender: broadcast::Sender<Bytes>,
     manager: Arc<ConnectionManager>,
-) -> Arc<Notify> {
+) -> (Arc<Notify>, JoinHandle<()>) {
     log::debug!("Socket address {:?}", addr);
     let socket_addr: SocketAddr = addr.to_socket_addrs().unwrap().next().unwrap();
     let message = protocol::HeartbeatMessage::start(&socket_addr)
@@ -298,7 +298,7 @@ pub async fn start_heartbeat(
     let notify = Arc::new(Notify::new());
     let notify_from_others = notify.clone();
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
@@ -312,7 +312,7 @@ pub async fn start_heartbeat(
             }
         }
     });
-    notify_from_others
+    (notify_from_others, handle)
 }
 
 #[cfg(test)]
@@ -560,5 +560,49 @@ mod tests {
 
         assert!(sender.is_closed());
         assert_eq!(start_manager.num_connections(), 0);
+    }
+
+    #[tokio::test]
+    async fn it_should_start_heartbeat_without_errors_and_handle_ticks() {
+        use tokio::time::sleep;
+        let _ = env_logger::try_init();
+        let _writer: Vec<Bytes> = vec![];
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let message = HandshakeMessage::start(&addr).unwrap();
+        let msg_bytes = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+        let msg_bytes_2 = BytesMut::from_iter(message.as_bytes().unwrap().iter());
+        let reader: Vec<Result<BytesMut, std::io::Error>> = vec![Ok(msg_bytes), Ok(msg_bytes_2)];
+        let _reader_iter = stream::iter(reader);
+
+        // limit the channel capacity to one message
+        let (sender, mut receiver) = broadcast::channel::<Bytes>(10);
+        let _sender_cloned = sender.clone();
+
+        let start_manager = Arc::new(ConnectionManager::new(3));
+        let local = "127.0.0.1:8080".parse().unwrap();
+        let s = Metadata {
+            created_at: SystemTime::now(),
+        };
+        assert!(start_manager.insert(local, s).unwrap().is_none());
+
+        let (_, _send_to_all_rx) = broadcast::channel::<Bytes>(32);
+
+        let (notifier, handle) = start_heartbeat(addr.to_string(), 1, sender, start_manager).await;
+
+        // notify once
+        notifier.notify_one();
+
+        let test_handle = tokio::spawn(async move {
+            let msg = receiver.recv().await;
+            assert!(msg.is_ok());
+        });
+
+        // wait for 5 ms, i.e. 5 interval ticks
+        sleep(Duration::from_millis(5)).await;
+
+        handle.abort();
+
+        let _ = tokio::join!(handle, test_handle);
     }
 }

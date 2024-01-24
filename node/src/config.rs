@@ -39,6 +39,7 @@ pub struct PeerConfig {
     pub max_peer_count: Option<usize>,
     pub max_pending_messages: Option<usize>,
     pub max_pending_send_to_all: Option<usize>,
+    pub heartbeat_interval: Option<u64>,
 }
 
 impl Default for PeerConfig {
@@ -48,6 +49,7 @@ impl Default for PeerConfig {
             max_peer_count: Some(10),
             max_pending_messages: Some(32),
             max_pending_send_to_all: Some(128),
+            heartbeat_interval: Some(1000),
         }
     }
 }
@@ -101,6 +103,7 @@ mod tests {
         assert_eq!(peer.max_peer_count, Some(10));
         assert_eq!(peer.max_pending_messages, Some(32));
         assert_eq!(peer.max_pending_send_to_all, Some(128));
+        assert_eq!(peer.heartbeat_interval, Some(1000));
     }
 
     #[test]
@@ -152,6 +155,7 @@ seeds = ["1.2.3.4:8080"]"#
         assert_eq!(peer.max_peer_count.unwrap(), 100);
         assert!(peer.max_pending_messages.is_none());
         assert!(peer.max_pending_send_to_all.is_none());
+        assert!(peer.heartbeat_interval.is_none());
     }
 
     #[test]
@@ -167,6 +171,7 @@ seeds = ["1.2.3.4:8080"]"#
         assert_eq!(peer.max_peer_count.unwrap(), 10);
         assert_eq!(peer.max_pending_messages.unwrap(), 32);
         assert_eq!(peer.max_pending_send_to_all.unwrap(), 128);
+        assert_eq!(peer.heartbeat_interval.unwrap(), 1000);
     }
 
     #[test]
@@ -182,6 +187,7 @@ seeds = ["1.2.3.4:8080"]"#
         assert_eq!(peer.max_peer_count.unwrap(), 10);
         assert_eq!(peer.max_pending_messages.unwrap(), 32);
         assert_eq!(peer.max_pending_send_to_all.unwrap(), 128);
+        assert_eq!(peer.heartbeat_interval.unwrap(), 1000);
     }
 
     #[test]

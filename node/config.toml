@@ -20,3 +20,6 @@ max_pending_messages = 32
 
 # Number of messages waiting to be sent to all peers
 max_pending_send_to_all = 128
+
+# Period in millis after which heartbeats are sent in case of quiscient period
+heartbeat_interval = 1000

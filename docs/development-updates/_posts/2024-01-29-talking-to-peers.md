@@ -1,7 +1,6 @@
 ---
 layout: post
 title: Connection management, broadcasts and more Rust
-image: assets/BC_Logo_.png
 ---
 
 Last week I focused on setting up components for managing connections

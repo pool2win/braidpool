@@ -27,7 +27,7 @@ mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
-    use crate::protocol::{HeartbeatMessage, Message, ProtocolMessage};
+    use crate::{HeartbeatMessage, Message, ProtocolMessage};
 
     #[test]
     fn it_matches_start_message_for_handshake() {

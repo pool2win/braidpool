@@ -60,8 +60,8 @@ mod tests {
     use super::Message;
     use super::PingMessage;
     use super::ProtocolMessage;
-    use crate::protocol::serde::Serialize;
     use bytes::Bytes;
+    use serde::Serialize;
     use std::net::SocketAddr;
     use std::str::FromStr;
 

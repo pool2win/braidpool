@@ -1,0 +1,17 @@
+[package]
+name = "connection"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+protocol = { path = "../protocol" }
+serde = { version = "1.0.188", features = ["derive"] }
+serde_derive = "1.0.188"
+log = "0.4.20"
+env_logger = "0.10.1"
+tokio = { version = "1", features = ["rt", "net", "macros", "rt-multi-thread", "tracing", "io-util"] }
+tokio-util = { version = "0.7.0", features = ["full"] }
+tokio-stream = { version = "0.1" }
+futures = { version = "0.3.28", features = ["thread-pool"]}
+futures-util = "0.3.30"
+toml = "0.8.8"

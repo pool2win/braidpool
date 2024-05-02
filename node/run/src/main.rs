@@ -1,16 +1,12 @@
-use bytes::Bytes;
 use clap::Parser;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tokio_util::bytes::Bytes;
 
 mod cli;
-mod config;
-mod connection;
-mod connection_manager;
-mod protocol;
 
-use crate::connection_manager::ConnectionManager;
+use connection::connection_manager::ConnectionManager;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

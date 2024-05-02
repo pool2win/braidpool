@@ -46,10 +46,13 @@ cd node
 cargo build
 
 # run the first seed node on port 6680
-cargo run --bind=localhost:6680
+RUST_LOG=info cargo run
 
-# run other nodes pointing to the seeding node and specify their own port as 6680
-cargo run --bind=localhost:6680 --addpeer=localhost:6680
+# run other nodes pointing to the seed node and specify their own port as 6681
+RUST_LOG=info cargo run -- --config-file=config.1.toml
+
+# run other nodes pointing to the seed node and specify their own port as 6682
+RUST_LOG=info cargo run -- --config-file=config.2.toml
 ```
 
 # Progress

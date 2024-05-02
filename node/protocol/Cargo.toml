@@ -1,0 +1,12 @@
+[package]
+name = "protocol"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytes = "1.4.0"
+flexbuffers = { version = "2.0.0", features = ["deserialize_human_readable", "serialize_human_readable"] }
+serde = { version = "1.0.188", features = ["derive"] }
+serde_derive = "1.0.188"
+log = "0.4.20"
+env_logger = "0.10.1"

@@ -23,9 +23,9 @@ impl ConnectionManager {
     pub fn new(capacity: usize) -> Self {
         ConnectionManager {
             capacity,
-            /// Use a Mutex here as changes to this table will be
-            /// infrequent. We can replace with crossbeam SkipMap if
-            /// this becomes a performance bottleneck.
+            // Use a Mutex here as changes to this table will be
+            // infrequent. We can replace with crossbeam SkipMap if
+            // this becomes a performance bottleneck.
             shared_state: Mutex::new(Map::new()),
         }
     }

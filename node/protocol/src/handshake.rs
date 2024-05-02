@@ -38,7 +38,7 @@ mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
-    use crate::protocol::{HandshakeMessage, Message, ProtocolMessage};
+    use crate::{HandshakeMessage, Message, ProtocolMessage};
 
     #[test]
     fn it_matches_start_message_for_handshake() {

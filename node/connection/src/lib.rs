@@ -1,4 +1,3 @@
-use bytes::{Bytes, BytesMut};
 use futures::{SinkExt, StreamExt};
 use std::marker::Unpin;
 use std::net::ToSocketAddrs;
@@ -12,11 +11,14 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time;
+use tokio_util::bytes::{Bytes, BytesMut};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-use crate::connection_manager::ConnectionManager;
-use crate::connection_manager::Metadata;
-use crate::protocol::{self, HandshakeMessage, ProtocolMessage};
+pub mod connection_manager;
+
+use connection_manager::ConnectionManager;
+use connection_manager::Metadata;
+use protocol::{HandshakeMessage, ProtocolMessage};
 use tokio::sync::broadcast;
 
 type Sender = mpsc::Sender<Bytes>;
@@ -318,10 +320,10 @@ pub async fn start_heartbeat(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
     use futures::stream;
     use std::io::ErrorKind;
     use std::net::{IpAddr, Ipv4Addr};
+    use tokio_util::bytes::Bytes;
 
     #[tokio::test]
     // TODO: This is a smoke test and we need to improve how we wait for listen to complete before we invoke connect.

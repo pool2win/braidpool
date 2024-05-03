@@ -2,13 +2,13 @@
 
 cd node
 cargo build
-RUST_LOG=debug cargo run -- --bind=localhost:6680 &
+RUST_LOG=info cargo run &
 sleep 1
-RUST_LOG=debug cargo run -- --bind=localhost:6680 --addpeer=localhost:6680 &
+RUST_LOG=info cargo run -- --config-file=config.1.toml &
 sleep 1
 
 echo
 echo ">>> Press any key to exit"
 read
 
-killall braidpool-node
+killall target/debug/run

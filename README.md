@@ -1,15 +1,7 @@
 
 [![Build status](https://github.com/wholooks/braidpool/actions/workflows/rust-node.yml/badge.svg)](https://github.com/pool2win/braidpool/actions/workflows/rust-node.yml) [![codecov](https://codecov.io/github/pool2win/braidpool/graph/badge.svg?token=41YE7WQS5J)](https://codecov.io/github/pool2win/braidpool)
 
-# Proposal
-
-Read the
-[proposal](https://github.com/pool2win/braidpool/blob/8d0724f9fb191ddbd5e02afa20f847fc0249f128/proposal/proposal.pdf)
-for braidpool.
-
-For details on how delivering shares to market makers for enabling hashrate
-futures, read the blog post: [Deliver Hashrate to Market
-Markets](https://blog.opdup.com/2021/08/18/deliver-hashrate-to-market-makers.html).
+# Goals
 
 The goals of the pool are:
 

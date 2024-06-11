@@ -48,13 +48,12 @@ impl<'a> PayoutUpdate<'a> {
         private_key: &SecretKey,
         tweak: &Scalar,
     ) -> Result<(), TaprootError> {
-        add_signature(
-            &mut self.transaction,
-            0,
-            &[self.coinbase_txout],
-            private_key,
-            tweak,
-        )
+        let mut prevouts = vec![self.coinbase_txout];
+        if self.prev_update_txout.is_some() {
+            prevouts.push(self.prev_update_txout.unwrap());
+        }
+
+        add_signature(&mut self.transaction, 0, &prevouts, private_key, tweak)
     }
 
     fn add_prevout_sig(
@@ -65,13 +64,9 @@ impl<'a> PayoutUpdate<'a> {
         let prev_update_txout = self
             .prev_update_txout
             .ok_or(TaprootError::InvalidSighashType(0))?;
-        add_signature(
-            &mut self.transaction,
-            1,
-            &[prev_update_txout],
-            private_key,
-            tweak,
-        )
+
+        let prevouts = vec![self.coinbase_txout, prev_update_txout];
+        add_signature(&mut self.transaction, 1, &prevouts, private_key, tweak)
     }
 
     fn build(self) -> Transaction {
@@ -140,6 +135,7 @@ fn add_signature(
     let keypair = private_key.keypair(&secp);
 
     let mut sighash_cache = SighashCache::new(transaction.clone());
+
     let sighash = sighash_cache.taproot_key_spend_signature_hash(
         input_idx,
         &Prevouts::All(prevouts),
@@ -151,11 +147,128 @@ fn add_signature(
         .add_xonly_tweak(&secp, tweak)
         .map_err(|_| TaprootError::InvalidSighashType(0))?;
 
-    let signature = secp.sign_schnorr_no_aux_rand(&message, &tweaked_keypair);
+    let signature = secp.sign_schnorr_with_rng(&message, &tweaked_keypair, &mut rand::thread_rng());
     let mut vec_sig = signature.serialize().to_vec();
     vec_sig.push(0x01);
+
+    secp.verify_schnorr(&signature, &message, &tweaked_keypair.x_only_public_key().0)
+        .unwrap();
 
     transaction.input[input_idx].witness.push(vec_sig);
 
     Ok(())
+}
+
+// unit tests
+#[cfg(test)]
+mod tests {
+    use bitcoin::{key::Keypair, secp256k1::All, Network};
+    use rand::Rng;
+
+    use super::*;
+
+    fn setup() -> (Secp256k1<All>, Keypair, Address) {
+        let secp = Secp256k1::new();
+        let mut rng = rand::thread_rng();
+
+        let data: [u8; 32] = rng.gen();
+        let keypair = SecretKey::from_slice(&data).unwrap().keypair(&secp);
+
+        let new_payout_address: Address =
+            Address::p2tr(&secp, keypair.x_only_public_key().0, None, Network::Regtest);
+
+        (secp, keypair, new_payout_address)
+    }
+
+    #[test]
+    fn test_new_payout_update_only_cb() {
+        let (_, _, new_payout_address) = setup();
+
+        let coinbase_tx = create_dummy_transaction();
+        let prev_update_tx = None;
+        let projected_fee = 1000;
+
+        let payout_update = PayoutUpdate::new(
+            prev_update_tx,
+            &coinbase_tx,
+            new_payout_address,
+            projected_fee,
+        )
+        .unwrap();
+
+        assert_eq!(payout_update.transaction.input.len(), 1);
+        assert_eq!(payout_update.transaction.output.len(), 1);
+        assert_eq!(
+            payout_update.transaction.output[0].value,
+            Amount::from_sat(50000000) - Amount::from_sat(projected_fee)
+        );
+        assert!(payout_update.prev_update_txout.is_none());
+    }
+
+    #[test]
+    fn test_new_payout_update() {
+        let (_, _, new_payout_address) = setup();
+
+        let coinbase_tx = create_dummy_transaction();
+        let prev_update_tx = create_dummy_transaction();
+
+        let projected_fee = 1000;
+
+        let payout_update = PayoutUpdate::new(
+            Some(&prev_update_tx),
+            &coinbase_tx,
+            new_payout_address,
+            projected_fee,
+        )
+        .unwrap();
+
+        assert_eq!(payout_update.transaction.input.len(), 2);
+        assert_eq!(payout_update.transaction.output.len(), 1);
+        assert_eq!(
+            payout_update.transaction.output[0].value,
+            Amount::from_sat(50000000 * 2) - Amount::from_sat(projected_fee)
+        );
+        assert!(payout_update.prev_update_txout.is_some());
+    }
+
+    #[test]
+    fn test_add_signature() {
+        let (_, keypair, new_payout_address) = setup();
+
+        let coinbase_tx = create_dummy_transaction();
+        let prev_update_tx = create_dummy_transaction();
+        let projected_fee = 1000;
+        let mut payout_update = PayoutUpdate::new(
+            Some(&prev_update_tx),
+            &coinbase_tx,
+            new_payout_address,
+            projected_fee,
+        )
+        .unwrap();
+
+        let tweak = Scalar::from_be_bytes([0; 32]).unwrap();
+        payout_update
+            .add_coinbase_sig(&keypair.secret_key(), &tweak)
+            .unwrap();
+
+        payout_update
+            .add_prevout_sig(&keypair.secret_key(), &tweak)
+            .unwrap();
+
+        assert_eq!(payout_update.transaction.input[0].witness.len(), 1);
+        assert_eq!(payout_update.transaction.input[1].witness.len(), 1);
+    }
+
+    fn create_dummy_transaction() -> Transaction {
+        let tx = Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![],
+            output: vec![TxOut {
+                value: Amount::from_sat(50000000),
+                script_pubkey: ScriptBuf::new(),
+            }],
+        };
+        tx
+    }
 }

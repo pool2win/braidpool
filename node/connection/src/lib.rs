@@ -210,7 +210,7 @@ where
                 if handle_received(writer, msg).await.is_err() {
                     return Err("Message handling failure: Closing peer connection".into());
                 } else {
-                    notifier.notified();
+                    notifier.notify_one();
                 }
             },
             Ok(msg_bytes) = send_to_all_receiver.recv() => {

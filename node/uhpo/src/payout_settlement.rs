@@ -7,7 +7,7 @@ use bitcoin::{
     secp256k1::{Message, Scalar, SecretKey},
     sighash::{Prevouts, SighashCache, TaprootError},
     transaction::Version,
-    Address, Amount, OutPoint, TapSighashType, Transaction, TxIn, TxOut, Txid,
+    Address, Amount, OutPoint, TapSighashType, Transaction, TxIn, TxOut,
 };
 
 pub struct PayoutSettlement<'a> {
@@ -43,9 +43,22 @@ impl<'a> PayoutSettlement<'a> {
         }
     }
 
-    pub fn add_sig(&mut self, private_key: &SecretKey, tweak: &Scalar) -> Result<(), TaprootError> {
+    pub fn add_sig(
+        &mut self,
+        private_key: &SecretKey,
+        tweak: &Option<Scalar>,
+    ) -> Result<(), TaprootError> {
         let secp = Secp256k1::new();
-        let keypair = private_key.keypair(&secp);
+
+        let keypair: bitcoin::key::Keypair;
+        if let Some(tweak) = tweak {
+            keypair = private_key
+                .keypair(&secp)
+                .add_xonly_tweak(&secp, tweak)
+                .unwrap();
+        } else {
+            keypair = private_key.keypair(&secp);
+        }
 
         let mut sighash_cache = SighashCache::new(self.transaction.clone());
 
@@ -56,16 +69,12 @@ impl<'a> PayoutSettlement<'a> {
         )?;
 
         let message = Message::from_digest(sighash.as_raw_hash().to_byte_array());
-        let tweaked_keypair = keypair
-            .add_xonly_tweak(&secp, tweak)
-            .map_err(|_| TaprootError::InvalidSighashType(0))?;
 
-        let signature =
-            secp.sign_schnorr_with_rng(&message, &tweaked_keypair, &mut rand::thread_rng());
+        let signature = secp.sign_schnorr_with_rng(&message, &keypair, &mut rand::thread_rng());
         let mut vec_sig = signature.serialize().to_vec();
         vec_sig.push(0x01);
 
-        secp.verify_schnorr(&signature, &message, &tweaked_keypair.x_only_public_key().0)
+        secp.verify_schnorr(&signature, &message, &keypair.x_only_public_key().0)
             .unwrap();
 
         self.transaction.input[0].witness.push(vec_sig);
@@ -81,7 +90,7 @@ impl<'a> PayoutSettlement<'a> {
 // unit tests
 #[cfg(test)]
 mod tests {
-    use bitcoin::{key::Keypair, secp256k1::All, Network, Script, ScriptBuf};
+    use bitcoin::{key::Keypair, secp256k1::All, Network, ScriptBuf};
     use rand::Rng;
 
     use super::*;
@@ -129,14 +138,13 @@ mod tests {
 
     #[test]
     fn test_add_sig() {
-        let (secp, keypair, cashout_map, _) = setup(3);
+        let (_, keypair, cashout_map, _) = setup(3);
         let latest_payout_update = create_dummy_transaction(Amount::from_sat(1000));
 
         let mut payout_settlement = PayoutSettlement::new(&latest_payout_update, &cashout_map);
-        let tweak = Scalar::from_be_bytes([0; 32]).unwrap();
 
         payout_settlement
-            .add_sig(&keypair.secret_key(), &tweak)
+            .add_sig(&keypair.secret_key(), &None)
             .unwrap();
 
         assert!(payout_settlement.transaction.input[0].witness.len() == 1);
@@ -155,5 +163,3 @@ mod tests {
         tx
     }
 }
-
-

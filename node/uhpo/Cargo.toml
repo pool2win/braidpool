@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 bitcoin = {version = "0.32.2" , features = ["rand"] }
 rand = "0.8.5"
+bitcoincore-rpc = "0.19.0"
+hex = "0.4.3"

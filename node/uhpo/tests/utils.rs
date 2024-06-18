@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Error, process::Command};
+use std::collections::HashMap;
 
 use bitcoin::{
     key::{Keypair, Secp256k1},
@@ -41,30 +41,6 @@ pub fn setup(n: u64) -> (Secp256k1<All>, Vec<Address>, Vec<Keypair>, Client) {
     (secp, miner_addresses, keypairs, btc_client)
 }
 
-// uses nigiri rpc to invoke bitcoin-cli to mine desired block
-pub fn mine_blocks(nblocks: u64) -> Result<(), Error> {
-    let output = Command::new("nigiri")
-        .arg("rpc")
-        .arg("--generate")
-        .arg(nblocks.to_string())
-        .output()?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let err = std::str::from_utf8(&output.stderr).map_err(|_| {
-        Error::new(
-            std::io::ErrorKind::Other,
-            "Failed to convert output to string",
-        )
-    })?;
-
-    Err(Error::new(
-        std::io::ErrorKind::Other,
-        format!("Failed to mine {} blocks with error: {}", nblocks, err),
-    ))
-}
 
 // Generate random P2TR address
 pub fn generate_taproot_address_nums(secp: &Secp256k1<All>) -> (Address, Keypair) {

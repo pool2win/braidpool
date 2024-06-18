@@ -17,4 +17,4 @@ simulations/logs/*
 simulations/*.toolbox
 venv
 target
-todos
+todo

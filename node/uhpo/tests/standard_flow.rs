@@ -24,7 +24,7 @@ use utils::*;
  * (Reference Image)[https://gist.githubusercontent.com/pool2win/77bb9b98f9f3b8c0f90963343c3c840f/raw/8fa2481728e7c12d553608af23ca6e551c7c90c1/uhpo-success.png]
  *
  * Test Case follows above Execution Flow
- * - uses Nigiri for Regtest.
+ * - Tested in Regtest Environment.
  *
  * Flow
  * - first block - mined by alice
@@ -47,6 +47,13 @@ struct UhpoState {
 fn standard_flow() {
     // -- Setup -- //
     let (secp, miner_addresses, miners, btcd_client) = setup(3);
+
+    // using short hand clossure to mine blocks
+    let mine_blocks = |nblocks| {
+        for _ in 0..nblocks {
+            btcd_client.generate_to_address(1, &Address::p2shwsh(&script::Builder::new().push_opcode(OP_0).into_script(), Network::Regtest)).unwrap();
+        }
+    };
 
     // compute Current block reward
     // Regtest Has halving for every 150 blocks making current block reward unpredictable. Each testcase mines about 110 blocks
@@ -145,31 +152,31 @@ fn standard_flow() {
     assert!(payout_update_101.is_err());
     assert_eq!(current_block_count - inital_block_num, 3);
 
-    mine_blocks(97).unwrap();
+    mine_blocks(97);
 
     // -- payout-update : 101 -- //
     let payout_update_101_txid: Txid = btcd_client
         .send_raw_transaction(&uhpo_entries[0].payout_update_tx)
         .unwrap();
-    mine_blocks(1).unwrap();
+    mine_blocks(1);
 
     // -- payout-update : 102 -- //
     let payout_update_102_txid = btcd_client
         .send_raw_transaction(&uhpo_entries[1].payout_update_tx)
         .unwrap();
-    mine_blocks(1).unwrap();
+    mine_blocks(1);
 
     // -- payout-update : 103 -- //
     let payout_update_103_txid = btcd_client
         .send_raw_transaction(&uhpo_entries[2].payout_update_tx)
         .unwrap();
-    mine_blocks(1).unwrap();
+    mine_blocks(1);
 
     // -- payout-settlement : 103 -- //
     let payout_settlement_103_txid = btcd_client
         .send_raw_transaction(&uhpo_entries[2].payout_settlement_tx)
         .unwrap();
-    mine_blocks(1).unwrap();
+    mine_blocks(1);
 
     assert_eq!(
         payout_update_101_txid,

@@ -1,18 +1,9 @@
 mod utils;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, thread::sleep, time::Duration};
 
 use bitcoin::{
-    absolute::LockTime,
-    hashes::Hash,
-    key::{Keypair, Secp256k1},
-    opcodes::OP_0,
-    script,
-    secp256k1::Scalar,
-    taproot::TaprootBuilder,
-    transaction::Version,
-    Address, Amount, Network, OutPoint, PublicKey, ScriptBuf, Sequence, Transaction, TxIn, TxOut,
-    Txid, Witness,
+    absolute::LockTime, hashes::Hash, key::{Keypair, Secp256k1}, opcodes::OP_0, script, secp256k1::Scalar, taproot::TaprootBuilder, transaction::Version, Address, Amount, BlockHash, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness
 };
 use bitcoincore_rpc::RpcApi;
 use rand::Rng;
@@ -36,6 +27,7 @@ use utils::*;
  * block 103 - payout-update and payout-settlement
  */
 
+// Uhpo Transactions and Signing Keypairs cached
 struct UhpoState {
     payout_update_kp: Keypair,
     payout_update_tx: Transaction,
@@ -45,46 +37,40 @@ struct UhpoState {
 #[test]
 fn standard_flow() {
     // -- Setup -- //
-    let (secp, miners) = setup(3);
+    let (secp, miner_addresses, miners, btcd_client ) = setup(3);
 
-    let miner_addresses: Vec<Address> = miners
-        .iter()
-        .map(|m| Address::p2pkh(&PublicKey::new(m.public_key()), Network::Regtest))
-        .collect();
-
-    let client = bitcoincore_rpc::Client::new(
-        "http://localhost:18443",
-        bitcoincore_rpc::Auth::UserPass(String::from("admin1"), String::from("123")),
-    )
-    .unwrap();
-
-    let inital_block_num = client.get_block_count().unwrap();
-    let block_reward =
+    // compute Current block reward
+    // Regtest Has halving for every 150 blocks making current block reward unpredictable. Each testcase mines about 110 blocks
+    let inital_block_num = btcd_client.get_block_count().unwrap();
+    let block_reward: Amount =
         Amount::from_btc(50_f64 / 2_f64.powf((inital_block_num as u32 / 150_u32) as f64)).unwrap();
 
-    // Mine 0..3 blocks
+    // Cache UhpoState entries
     let mut uhpo_entries: Vec<UhpoState> = Vec::new();
 
+    // Mine 3 blocks and cache payout update/settlement Transactions
     (0..3).for_each(|i| {
-        // -- Mine First BLock -- //
-        let (_, coinbase_kp) = generate_taproot_address_nums();
+        let (_, coinbase_kp) = generate_taproot_address_nums(&secp);
 
+        // compute coinbase address for each miner cb_addr = p2tr(poolkey + MAST(timelock)*G)
         let (coinbase_addr, coinbase_tr_info) = generate_coinbase_address(
+            &secp,
             coinbase_kp.x_only_public_key().0,
             &miners[i].x_only_public_key().0,
         )
         .unwrap();
 
-        //   -- payout-build/settlement and cache
-        let coinbase_tx = &compute_coinbase_tx(
+        // build coinbaseTx exact same way as built by Regtest
+        let coinbase_tx: &Transaction = &compute_coinbase_tx(
             coinbase_addr.script_pubkey(),
-            (client.get_block_count().unwrap() + 1_u64)
+            (btcd_client.get_block_count().unwrap() + 1_u64)
                 .try_into()
                 .unwrap(),
             block_reward,
         );
-        let (_, payout_update_kp) = generate_taproot_address_nums();
+        let (_, payout_update_kp) = generate_taproot_address_nums(&secp);
 
+        // Initial Payout Update is None!!
         let (prev_update_tx, prev_update_poolkp, prev_update_tweak) = if i == 0 {
             (None, None, None)
         } else {
@@ -133,51 +119,56 @@ fn standard_flow() {
             payout_update_tx,
             payout_settlement_tx,
         };
-
         uhpo_entries.push(uhpo_state);
 
-        generate_block_to_address(&coinbase_addr).unwrap();
+        let block_hashs: Vec<BlockHash> = btcd_client.generate_to_address(1, &coinbase_addr).unwrap();
+        let coinbase_txid: Txid = btcd_client.get_block(&block_hashs[0]).unwrap().txdata[0].compute_txid();
+
+        assert_eq!(coinbase_txid , coinbase_tx.compute_txid());
     });
 
-    let current_block_count = client.get_block_count().unwrap();
+    let current_block_count = btcd_client.get_block_count().unwrap();
+    let payout_update_101_txid: Result<Txid, bitcoincore_rpc::Error> = btcd_client.send_raw_transaction(&uhpo_entries[0].payout_update_tx);
 
-    assert!(current_block_count - inital_block_num == 3);
-
-    let payout_update_101_txid = client.send_raw_transaction(&uhpo_entries[0].payout_update_tx);
     assert!(payout_update_101_txid.is_err());
+    assert_eq!(current_block_count - inital_block_num , 3);
 
     mine_blocks(97).unwrap();
 
     // -- payout-update : 101 -- //
-    let payout_update_101_txid = client
+    let payout_update_101_txid: Txid = btcd_client
         .send_raw_transaction(&uhpo_entries[0].payout_update_tx)
         .unwrap();
-    assert!(payout_update_101_txid == uhpo_entries[0].payout_update_tx.compute_txid());
-
+    assert_eq!(payout_update_101_txid , uhpo_entries[0].payout_update_tx.compute_txid());
     mine_blocks(1).unwrap();
 
     // -- payout-update : 102 -- //
-    let payout_update_102_txid = client
+    let payout_update_102_txid = btcd_client
         .send_raw_transaction(&uhpo_entries[1].payout_update_tx)
         .unwrap();
-    assert!(payout_update_102_txid == uhpo_entries[1].payout_update_tx.compute_txid());
+    assert_eq!(payout_update_102_txid , uhpo_entries[1].payout_update_tx.compute_txid());
     mine_blocks(1).unwrap();
 
     // -- payout-update : 103 -- //
-    let payout_update_103_txid = client
+    let payout_update_103_txid = btcd_client
         .send_raw_transaction(&uhpo_entries[2].payout_update_tx)
         .unwrap();
-    assert!(payout_update_103_txid == uhpo_entries[2].payout_update_tx.compute_txid());
+    assert_eq!(payout_update_103_txid , uhpo_entries[2].payout_update_tx.compute_txid());
     mine_blocks(1).unwrap();
 
     // -- payout-settlement : 103 -- //
-    let payout_settlement_103_txid = client
+    let payout_settlement_103_txid = btcd_client
         .send_raw_transaction(&uhpo_entries[2].payout_settlement_tx)
         .unwrap();
-    assert!(payout_settlement_103_txid == uhpo_entries[2].payout_settlement_tx.compute_txid());
+    assert_eq!(payout_settlement_103_txid , uhpo_entries[2].payout_settlement_tx.compute_txid());
+    mine_blocks(1).unwrap();
 
-    // check states and balances
-    // states - assertions, balances
+    sleep(Duration::from_millis(5000));
+    uhpo_entries[2].payout_settlement_tx.output.iter().for_each(|o| {
+        let miner_address = Address::from_script(&o.script_pubkey, Network::Regtest).unwrap();
+        let balance = get_balance(miner_address.to_string().as_str()).unwrap();
+        assert_eq!(balance , o.value.to_sat());
+    })
 }
 
 fn compute_coinbase_tx(

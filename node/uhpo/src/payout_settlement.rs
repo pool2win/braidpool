@@ -3,12 +3,14 @@ use std::collections::HashMap;
 use bitcoin::{
     absolute::LockTime,
     hashes::Hash,
-    key::Secp256k1,
+    key::{Keypair, Secp256k1},
     secp256k1::{Message, Scalar, SecretKey},
-    sighash::{Prevouts, SighashCache, TaprootError},
+    sighash::{Prevouts, SighashCache},
     transaction::Version,
     Address, Amount, OutPoint, TapSighashType, Transaction, TxIn, TxOut,
 };
+
+use crate::error::UhpoError;
 
 pub struct PayoutSettlement<'a> {
     transaction: Transaction,
@@ -47,18 +49,13 @@ impl<'a> PayoutSettlement<'a> {
         &mut self,
         private_key: &SecretKey,
         tweak: &Option<Scalar>,
-    ) -> Result<(), TaprootError> {
+    ) -> Result<(), UhpoError> {
         let secp = Secp256k1::new();
 
-        let keypair: bitcoin::key::Keypair;
-        if let Some(tweak) = tweak {
-            keypair = private_key
-                .keypair(&secp)
-                .add_xonly_tweak(&secp, tweak)
-                .unwrap();
-        } else {
-            keypair = private_key.keypair(&secp);
-        }
+        let keypair: Keypair = match tweak {
+            Some(tweak) => private_key.keypair(&secp).add_xonly_tweak(&secp, tweak)?,
+            None => private_key.keypair(&secp),
+        };
 
         let mut sighash_cache = SighashCache::new(self.transaction.clone());
 
@@ -74,8 +71,7 @@ impl<'a> PayoutSettlement<'a> {
         let mut vec_sig = signature.serialize().to_vec();
         vec_sig.push(0x01);
 
-        secp.verify_schnorr(&signature, &message, &keypair.x_only_public_key().0)
-            .unwrap();
+        secp.verify_schnorr(&signature, &message, &keypair.x_only_public_key().0)?;
 
         self.transaction.input[0].witness.push(vec_sig);
 
@@ -131,8 +127,12 @@ mod tests {
 
         settlement_tx.output.iter().for_each(|o| {
             let address = Address::from_script(&o.script_pubkey, Network::Regtest).unwrap();
-
-            assert!(cashout_map.get(&address).unwrap() == &o.value);
+            assert!(
+                cashout_map
+                    .get(&address)
+                    .expect("Address not found in cashout_map")
+                    == &o.value
+            );
         });
     }
 
@@ -145,7 +145,7 @@ mod tests {
 
         payout_settlement
             .add_sig(&keypair.secret_key(), &None)
-            .unwrap();
+            .expect("Failed to add signature");
 
         assert!(payout_settlement.transaction.input[0].witness.len() == 1);
     }

@@ -3,13 +3,15 @@ use std::fmt::Error;
 use bitcoin::{
     absolute::LockTime,
     hashes::Hash,
-    key::Secp256k1,
+    key::{Keypair, Secp256k1},
     secp256k1::{Message, Scalar, SecretKey},
-    sighash::{Prevouts, SighashCache, TaprootError},
+    sighash::{Prevouts, SighashCache},
     transaction::Version,
     Address, Amount, OutPoint, ScriptBuf, Sequence, TapSighashType, Transaction, TxIn, TxOut,
     Witness,
 };
+
+use crate::error::UhpoError;
 
 pub struct PayoutUpdate<'a> {
     transaction: Transaction,
@@ -47,11 +49,11 @@ impl<'a> PayoutUpdate<'a> {
         &mut self,
         private_key: &SecretKey,
         tweak: &Option<Scalar>,
-    ) -> Result<(), TaprootError> {
-        let mut prevouts = vec![self.coinbase_txout];
-        if self.prev_update_txout.is_some() {
-            prevouts.push(self.prev_update_txout.unwrap());
-        }
+    ) -> Result<(), UhpoError> {
+        let prevouts = match self.prev_update_txout {
+            Some(prev_update_txout) => vec![self.coinbase_txout, prev_update_txout],
+            None => vec![self.coinbase_txout],
+        };
 
         add_signature(&mut self.transaction, 0, &prevouts, private_key, tweak)
     }
@@ -60,10 +62,8 @@ impl<'a> PayoutUpdate<'a> {
         &mut self,
         private_key: &SecretKey,
         tweak: &Option<Scalar>,
-    ) -> Result<(), TaprootError> {
-        let prev_update_txout = self
-            .prev_update_txout
-            .ok_or(TaprootError::InvalidSighashType(0))?;
+    ) -> Result<(), UhpoError> {
+        let prev_update_txout = self.prev_update_txout.ok_or(UhpoError::NoPrevUpdateTxOut)?;
 
         let prevouts = vec![self.coinbase_txout, prev_update_txout];
         add_signature(&mut self.transaction, 1, &prevouts, private_key, tweak)
@@ -130,18 +130,13 @@ fn add_signature(
     prevouts: &[&TxOut],
     private_key: &SecretKey,
     tweak: &Option<Scalar>,
-) -> Result<(), TaprootError> {
+) -> Result<(), UhpoError> {
     let secp = Secp256k1::new();
-    let keypair: bitcoin::key::Keypair;
 
-    if let Some(tweak) = tweak {
-        keypair = private_key
-            .keypair(&secp)
-            .add_xonly_tweak(&secp, tweak)
-            .unwrap();
-    } else {
-        keypair = private_key.keypair(&secp);
-    }
+    let keypair: Keypair = match tweak {
+        Some(tweak) => private_key.keypair(&secp).add_xonly_tweak(&secp, tweak)?,
+        None => private_key.keypair(&secp),
+    };
 
     let mut sighash_cache = SighashCache::new(transaction.clone());
 
@@ -157,8 +152,7 @@ fn add_signature(
     let mut vec_sig = signature.serialize().to_vec();
     vec_sig.push(0x01);
 
-    secp.verify_schnorr(&signature, &message, &keypair.x_only_public_key().0)
-        .unwrap();
+    secp.verify_schnorr(&signature, &message, &keypair.x_only_public_key().0)?;
 
     transaction.input[input_idx].witness.push(vec_sig);
 
@@ -200,7 +194,7 @@ mod tests {
             new_payout_address,
             projected_fee,
         )
-        .unwrap();
+        .expect("Failed to create payout update");
 
         assert_eq!(payout_update.transaction.input.len(), 1);
         assert_eq!(payout_update.transaction.output.len(), 1);
@@ -226,7 +220,7 @@ mod tests {
             new_payout_address,
             projected_fee,
         )
-        .unwrap();
+        .expect("Failed to create payout update");
 
         assert_eq!(payout_update.transaction.input.len(), 2);
         assert_eq!(payout_update.transaction.output.len(), 1);
@@ -250,15 +244,15 @@ mod tests {
             new_payout_address,
             projected_fee,
         )
-        .unwrap();
+        .expect("Failed to create payout update");
 
         payout_update
             .add_coinbase_sig(&keypair.secret_key(), &None)
-            .unwrap();
+            .expect("Failed to add coinbase signature");
 
         payout_update
             .add_prev_update_sig(&keypair.secret_key(), &None)
-            .unwrap();
+            .expect("Failed to add prev update signature");
 
         assert_eq!(payout_update.transaction.input[0].witness.len(), 1);
         assert_eq!(payout_update.transaction.input[1].witness.len(), 1);

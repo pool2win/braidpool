@@ -44,5 +44,3 @@ impl UhpoError {
         UhpoError::Other(message.to_string())
     }
 }
-
-

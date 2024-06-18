@@ -3,7 +3,16 @@ mod utils;
 use std::{collections::HashMap, thread::sleep, time::Duration};
 
 use bitcoin::{
-    absolute::LockTime, hashes::Hash, key::{Keypair, Secp256k1}, opcodes::OP_0, script, secp256k1::Scalar, taproot::TaprootBuilder, transaction::Version, Address, Amount, BlockHash, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness
+    absolute::LockTime,
+    hashes::Hash,
+    key::{Keypair, Secp256k1},
+    opcodes::OP_0,
+    script,
+    secp256k1::Scalar,
+    taproot::TaprootBuilder,
+    transaction::Version,
+    Address, Amount, BlockHash, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut,
+    Txid, Witness,
 };
 use bitcoincore_rpc::RpcApi;
 use rand::Rng;
@@ -37,7 +46,7 @@ struct UhpoState {
 #[test]
 fn standard_flow() {
     // -- Setup -- //
-    let (secp, miner_addresses, miners, btcd_client ) = setup(3);
+    let (secp, miner_addresses, miners, btcd_client) = setup(3);
 
     // compute Current block reward
     // Regtest Has halving for every 150 blocks making current block reward unpredictable. Each testcase mines about 110 blocks
@@ -121,17 +130,20 @@ fn standard_flow() {
         };
         uhpo_entries.push(uhpo_state);
 
-        let block_hashs: Vec<BlockHash> = btcd_client.generate_to_address(1, &coinbase_addr).unwrap();
-        let coinbase_txid: Txid = btcd_client.get_block(&block_hashs[0]).unwrap().txdata[0].compute_txid();
+        let block_hashs: Vec<BlockHash> =
+            btcd_client.generate_to_address(1, &coinbase_addr).unwrap();
+        let coinbase_txid: Txid =
+            btcd_client.get_block(&block_hashs[0]).unwrap().txdata[0].compute_txid();
 
-        assert_eq!(coinbase_txid , coinbase_tx.compute_txid());
+        assert_eq!(coinbase_txid, coinbase_tx.compute_txid());
     });
 
     let current_block_count = btcd_client.get_block_count().unwrap();
-    let payout_update_101_txid: Result<Txid, bitcoincore_rpc::Error> = btcd_client.send_raw_transaction(&uhpo_entries[0].payout_update_tx);
+    let payout_update_101: Result<Txid, bitcoincore_rpc::Error> =
+        btcd_client.send_raw_transaction(&uhpo_entries[0].payout_update_tx);
 
-    assert!(payout_update_101_txid.is_err());
-    assert_eq!(current_block_count - inital_block_num , 3);
+    assert!(payout_update_101.is_err());
+    assert_eq!(current_block_count - inital_block_num, 3);
 
     mine_blocks(97).unwrap();
 
@@ -139,35 +151,72 @@ fn standard_flow() {
     let payout_update_101_txid: Txid = btcd_client
         .send_raw_transaction(&uhpo_entries[0].payout_update_tx)
         .unwrap();
-    assert_eq!(payout_update_101_txid , uhpo_entries[0].payout_update_tx.compute_txid());
     mine_blocks(1).unwrap();
 
     // -- payout-update : 102 -- //
     let payout_update_102_txid = btcd_client
         .send_raw_transaction(&uhpo_entries[1].payout_update_tx)
         .unwrap();
-    assert_eq!(payout_update_102_txid , uhpo_entries[1].payout_update_tx.compute_txid());
     mine_blocks(1).unwrap();
 
     // -- payout-update : 103 -- //
     let payout_update_103_txid = btcd_client
         .send_raw_transaction(&uhpo_entries[2].payout_update_tx)
         .unwrap();
-    assert_eq!(payout_update_103_txid , uhpo_entries[2].payout_update_tx.compute_txid());
     mine_blocks(1).unwrap();
 
     // -- payout-settlement : 103 -- //
     let payout_settlement_103_txid = btcd_client
         .send_raw_transaction(&uhpo_entries[2].payout_settlement_tx)
         .unwrap();
-    assert_eq!(payout_settlement_103_txid , uhpo_entries[2].payout_settlement_tx.compute_txid());
     mine_blocks(1).unwrap();
 
+    assert_eq!(
+        payout_update_101_txid,
+        uhpo_entries[0].payout_update_tx.compute_txid()
+    );
+    assert_eq!(
+        payout_update_102_txid,
+        uhpo_entries[1].payout_update_tx.compute_txid()
+    );
+    assert_eq!(
+        payout_update_103_txid,
+        uhpo_entries[2].payout_update_tx.compute_txid()
+    );
+    assert_eq!(
+        payout_settlement_103_txid,
+        uhpo_entries[2].payout_settlement_tx.compute_txid()
+    );
+
+    // Electrs Indexer takes about 5 seconds to sync.
     sleep(Duration::from_millis(5000));
-    uhpo_entries[2].payout_settlement_tx.output.iter().for_each(|o| {
-        let miner_address = Address::from_script(&o.script_pubkey, Network::Regtest).unwrap();
-        let balance = get_balance(miner_address.to_string().as_str()).unwrap();
-        assert_eq!(balance , o.value.to_sat());
+
+    // Ensure All Payouts are settled with correct amounts
+    uhpo_entries[2]
+        .payout_settlement_tx
+        .output
+        .iter()
+        .for_each(|o| {
+            let miner_address = Address::from_script(&o.script_pubkey, Network::Regtest).unwrap();
+            let balance = get_balance(miner_address.to_string().as_str()).unwrap();
+            assert_eq!(balance, o.value.to_sat());
+        });
+
+    // Ensure all payout updates are spent
+    uhpo_entries.iter().for_each(|u| {
+        let payout_update_address = Address::from_script(
+            &u.payout_update_tx.output[0].script_pubkey,
+            Network::Regtest,
+        )
+        .unwrap();
+        let balance = get_balance(payout_update_address.to_string().as_str()).unwrap();
+        assert_eq!(balance, 0);
+    });
+
+    // Try spending payout-settlement Transaction (Expected to fail)
+    uhpo_entries.iter().for_each(|u| {
+        let payout_settlement = btcd_client.send_raw_transaction(&u.payout_settlement_tx);
+        assert!(payout_settlement.is_err());
     })
 }
 

@@ -211,7 +211,6 @@ mod tests {
 
         let coinbase_tx = create_dummy_transaction();
         let prev_update_tx = create_dummy_transaction();
-
         let projected_fee = Amount::from_sat(1000);
 
         let payout_update = PayoutUpdate::new(

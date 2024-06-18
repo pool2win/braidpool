@@ -1,4 +1,3 @@
-
 use std::{collections::HashMap, io::Error, process::Command};
 
 use bitcoin::{
@@ -15,9 +14,8 @@ use bitcoin::{
 use bitcoincore_rpc::Client;
 use rand::Rng;
 
-
 // -- common setup -- //
-pub fn setup(n: u64) -> (Secp256k1<All>, Vec<Address>, Vec<Keypair>, Client ) {
+pub fn setup(n: u64) -> (Secp256k1<All>, Vec<Address>, Vec<Keypair>, Client) {
     let secp = Secp256k1::new();
     let mut rng = rand::thread_rng();
 
@@ -40,7 +38,7 @@ pub fn setup(n: u64) -> (Secp256k1<All>, Vec<Address>, Vec<Keypair>, Client ) {
         .map(|m| Address::p2pkh(&PublicKey::new(m.public_key()), Network::Regtest))
         .collect();
 
-    (secp, miner_addresses, keypairs, btc_client )
+    (secp, miner_addresses, keypairs, btc_client)
 }
 
 // uses nigiri rpc to invoke bitcoin-cli to mine desired block
@@ -67,8 +65,6 @@ pub fn mine_blocks(nblocks: u64) -> Result<(), Error> {
         format!("Failed to mine {} blocks with error: {}", nblocks, err),
     ))
 }
-
-
 
 // Generate random P2TR address
 pub fn generate_taproot_address_nums(secp: &Secp256k1<All>) -> (Address, Keypair) {
@@ -126,7 +122,6 @@ pub fn build_timelock_script(nblocks: i64, pubkey: &XOnlyPublicKey) -> ScriptBuf
         .into_script()
 }
 
-
 // Get Balance from Esplora Client
 #[derive(Debug, serde::Deserialize)]
 struct ChainStats {
@@ -139,7 +134,8 @@ pub fn get_balance(address: &str) -> Result<u64, BalanceError> {
     let response = reqwest::blocking::get(&url)?.text()?;
 
     let json_data: HashMap<String, serde_json::Value> = serde_json::from_str(&response)?;
-    let chain_stats = json_data.get("chain_stats")
+    let chain_stats = json_data
+        .get("chain_stats")
         .ok_or_else(|| "chain_stats field not found".to_owned())?;
 
     let chain_stats: ChainStats = serde_json::from_value(chain_stats.clone())?;

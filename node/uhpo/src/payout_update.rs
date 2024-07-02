@@ -13,29 +13,29 @@ use bitcoin::{
 
 use crate::error::UhpoError;
 
-pub struct PayoutUpdate<'a> {
+pub struct PayoutUpdate {
     transaction: Transaction,
-    coinbase_txout: &'a TxOut,
-    prev_update_txout: Option<&'a TxOut>,
+    coinbase_txout: TxOut,
+    prev_update_txout: Option<TxOut>,
 }
 
-impl<'a> PayoutUpdate<'a> {
+impl PayoutUpdate {
     pub fn new(
-        prev_update_tx: Option<&'a Transaction>,
-        coinbase_tx: &'a Transaction,
+        prev_update_tx: Option<Transaction>,
+        coinbase_tx: Transaction,
         next_out_address: Address,
         projected_fee: Amount,
     ) -> Result<Self, Error> {
-        let prev_update_txout = prev_update_tx.map(|tx| &tx.output[0]);
-        let coinbase_txout = &coinbase_tx.output[0];
+        let prev_update_txout = prev_update_tx.as_ref().map(|tx| tx.output[0].clone());
+        let coinbase_txout = coinbase_tx.output[0].clone();
 
         let payout_update_tx = build_transaction(
-            coinbase_tx,
-            prev_update_tx,
+            &coinbase_tx,
+            prev_update_tx.as_ref(),
             next_out_address,
             projected_fee,
-            coinbase_txout,
-            prev_update_txout,
+            &coinbase_txout,
+            prev_update_txout.as_ref(),
         )?;
 
         Ok(PayoutUpdate {
@@ -50,9 +50,9 @@ impl<'a> PayoutUpdate<'a> {
         private_key: &SecretKey,
         tweak: &Option<Scalar>,
     ) -> Result<(), UhpoError> {
-        let prevouts = match self.prev_update_txout {
-            Some(prev_update_txout) => vec![self.coinbase_txout, prev_update_txout],
-            None => vec![self.coinbase_txout],
+        let prevouts = match &self.prev_update_txout {
+            Some(prev_update_txout) => vec![&self.coinbase_txout, prev_update_txout],
+            None => vec![&self.coinbase_txout],
         };
 
         add_signature(&mut self.transaction, 0, &prevouts, private_key, tweak)
@@ -63,9 +63,12 @@ impl<'a> PayoutUpdate<'a> {
         private_key: &SecretKey,
         tweak: &Option<Scalar>,
     ) -> Result<(), UhpoError> {
-        let prev_update_txout = self.prev_update_txout.ok_or(UhpoError::NoPrevUpdateTxOut)?;
-        let prevouts = vec![self.coinbase_txout, prev_update_txout];
-        
+        let prev_update_txout = self
+            .prev_update_txout
+            .as_ref()
+            .ok_or(UhpoError::NoPrevUpdateTxOut)?;
+        let prevouts = vec![&self.coinbase_txout, prev_update_txout];
+
         add_signature(&mut self.transaction, 1, &prevouts, private_key, tweak)
     }
 
@@ -190,7 +193,7 @@ mod tests {
 
         let payout_update = PayoutUpdate::new(
             prev_update_tx,
-            &coinbase_tx,
+            coinbase_tx,
             new_payout_address,
             projected_fee,
         )
@@ -214,8 +217,8 @@ mod tests {
         let projected_fee = Amount::from_sat(1000);
 
         let payout_update = PayoutUpdate::new(
-            Some(&prev_update_tx),
-            &coinbase_tx,
+            Some(prev_update_tx),
+            coinbase_tx,
             new_payout_address,
             projected_fee,
         )
@@ -238,8 +241,8 @@ mod tests {
         let prev_update_tx = create_dummy_transaction();
         let projected_fee = Amount::from_sat(1000);
         let mut payout_update = PayoutUpdate::new(
-            Some(&prev_update_tx),
-            &coinbase_tx,
+            Some(prev_update_tx),
+            coinbase_tx,
             new_payout_address,
             projected_fee,
         )

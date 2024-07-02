@@ -40,7 +40,7 @@ impl fmt::Display for UhpoError {
 impl std::error::Error for UhpoError {}
 
 impl UhpoError {
-    pub fn new_other_error(message: &str) -> Self {
+    pub fn new(message: &str) -> Self {
         UhpoError::Other(message.to_string())
     }
 }

@@ -7,7 +7,7 @@ use bitcoin::{
     secp256k1::{Message, Scalar, SecretKey},
     sighash::{Prevouts, SighashCache},
     transaction::Version,
-    Address, Amount, OutPoint, ScriptBuf, Sequence, TapSighashType, Transaction, TxIn, TxOut,
+    Address, Amount, OutPoint, ScriptBuf, Sequence, TapSighashType, Transaction, TxIn, TxOut, Txid,
     Witness,
 };
 
@@ -21,21 +21,21 @@ pub struct PayoutUpdate {
 
 impl PayoutUpdate {
     pub fn new(
-        prev_update_tx: Option<Transaction>,
+        mut prev_update_tx: Option<Transaction>,
         coinbase_tx: Transaction,
         next_out_address: Address,
         projected_fee: Amount,
     ) -> Result<Self, Error> {
-        let prev_update_txout = prev_update_tx.as_ref().map(|tx| tx.output[0].clone());
+        let prev_update_txout = prev_update_tx.as_mut().map(|tx| tx.output[0].clone());
         let coinbase_txout = coinbase_tx.output[0].clone();
 
         let payout_update_tx = build_transaction(
-            &coinbase_tx,
-            prev_update_tx.as_ref(),
+            coinbase_tx.compute_txid(),
+            prev_update_tx,
             next_out_address,
             projected_fee,
-            &coinbase_txout,
-            prev_update_txout.as_ref(),
+            coinbase_txout.value,
+            prev_update_txout.clone(),
         )?;
 
         Ok(PayoutUpdate {
@@ -78,14 +78,13 @@ impl PayoutUpdate {
 }
 
 fn build_transaction(
-    coinbase_tx: &Transaction,
-    prev_update_tx: Option<&Transaction>,
+    coinbase_txid: Txid,
+    prev_update_tx: Option<Transaction>, // KP - Same as above, we can simply send in txid. General rule being, instead of Struct values, just pass the data that the function needs.
     next_out_address: Address,
     projected_fee: Amount,
-    coinbase_txout: &TxOut,
-    prev_update_txout: Option<&TxOut>,
+    mut total_amount: Amount,
+    prev_update_txout: Option<TxOut>, // KP - Here we are only us the values to add to total amount. Maybe clients can simply send the value in so we don't have to pass in the TxOut values?
 ) -> Result<Transaction, Error> {
-    let mut total_amount = coinbase_txout.value;
     if let Some(tx_out) = prev_update_txout {
         total_amount += tx_out.value;
     }
@@ -99,7 +98,7 @@ fn build_transaction(
 
     payout_update_tx.input.push(TxIn {
         previous_output: OutPoint {
-            txid: coinbase_tx.compute_txid(),
+            txid: coinbase_txid,
             vout: 0,
         },
         script_sig: ScriptBuf::new(),

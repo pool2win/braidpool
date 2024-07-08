@@ -4,8 +4,9 @@ use bitcoin::sighash::TaprootError;
 
 #[derive(Debug)]
 pub enum UhpoError {
+    KeypairCreationError(bitcoin::secp256k1::Error),
+    SignatureVerificationError(bitcoin::secp256k1::Error),
     TaprootError(TaprootError),
-    Secp256k1Error(bitcoin::secp256k1::Error),
     NoPrevUpdateTxOut,
     Other(String),
 }
@@ -18,15 +19,16 @@ impl From<TaprootError> for UhpoError {
 
 impl From<bitcoin::secp256k1::Error> for UhpoError {
     fn from(err: bitcoin::secp256k1::Error) -> Self {
-        UhpoError::Secp256k1Error(err)
+        UhpoError::KeypairCreationError(err)
     }
 }
 
 impl fmt::Display for UhpoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            UhpoError::KeypairCreationError(err) => write!(f, "Keypair creation error: {}", err),
             UhpoError::TaprootError(err) => write!(f, "Taproot error: {}", err),
-            UhpoError::Secp256k1Error(err) => {
+            UhpoError::SignatureVerificationError(err) => {
                 write!(f, "Signature verification error: {}", err)
             }
             UhpoError::NoPrevUpdateTxOut => {

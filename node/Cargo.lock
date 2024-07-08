@@ -1443,7 +1443,9 @@ name = "uhpo"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
+ "mockall",
  "rand",
+ "secp256k1",
 ]
 
 [[package]]

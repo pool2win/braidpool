@@ -1,23 +1,24 @@
 use std::fmt::Error;
 
 use bitcoin::{
-    absolute::LockTime,
     hashes::Hash,
     key::{Keypair, Secp256k1},
-    secp256k1::{Message, Scalar, SecretKey},
+    secp256k1::{Message, Scalar, SecretKey , All},
     sighash::{Prevouts, SighashCache},
-    transaction::Version,
-    Address, Amount, OutPoint, ScriptBuf, Sequence, TapSighashType, Transaction, TxIn, TxOut,
-    Witness,
+    Address, Amount, TapSighashType, Transaction, TxOut,
 };
 
-use crate::error::UhpoError;
+use crate::{transaction::TransactionBuilder, UhpoError};
 
+/// `PayoutUpdate` represents an update to a Eltoo style payout.
 pub struct PayoutUpdate {
     transaction: Transaction,
+
+    // coinbase and prev_update txout's are to be store and used while signing respective inputs
     coinbase_txout: TxOut,
     prev_update_txout: Option<TxOut>,
 }
+
 
 impl PayoutUpdate {
     pub fn new(
@@ -26,20 +27,30 @@ impl PayoutUpdate {
         next_out_address: Address,
         projected_fee: Amount,
     ) -> Result<Self, Error> {
-        let prev_update_txout = prev_update_tx.as_ref().map(|tx| tx.output[0].clone());
         let coinbase_txout = coinbase_tx.output[0].clone();
 
-        let payout_update_tx = build_transaction(
-            &coinbase_tx,
-            prev_update_tx.as_ref(),
-            next_out_address,
-            projected_fee,
-            &coinbase_txout,
-            prev_update_txout.as_ref(),
-        )?;
+        // coinbase created by implementation crate would always  have spending vout set to 0
+        let mut builder = TransactionBuilder::new().add_input(coinbase_tx.compute_txid(), 0);
+
+        let prev_update_txout = if let Some(tx) = prev_update_tx {
+            builder = builder.add_input(tx.compute_txid(), 0);
+            Some(tx.output[0].clone())
+        } else {
+            None
+        };
+
+        let total_amount = prev_update_txout
+            .as_ref()
+            .map_or(coinbase_txout.value, |txout| {
+                coinbase_txout.value + txout.value
+            });
+
+        let transaction = builder
+            .add_output(next_out_address, total_amount - projected_fee)
+            .build();
 
         Ok(PayoutUpdate {
-            transaction: payout_update_tx,
+            transaction,
             coinbase_txout,
             prev_update_txout,
         })
@@ -47,21 +58,23 @@ impl PayoutUpdate {
 
     pub fn add_coinbase_sig(
         &mut self,
-        private_key: &SecretKey,
-        tweak: &Option<Scalar>,
+        private_key: SecretKey,
+        tweak: Option<&Scalar>,
+        secp: &Secp256k1<All>,
     ) -> Result<(), UhpoError> {
         let prevouts = match &self.prev_update_txout {
             Some(prev_update_txout) => vec![&self.coinbase_txout, prev_update_txout],
             None => vec![&self.coinbase_txout],
         };
 
-        add_signature(&mut self.transaction, 0, &prevouts, private_key, tweak)
+        add_signature(&mut self.transaction, 0, &prevouts, private_key, tweak , secp)
     }
 
     pub fn add_prev_update_sig(
         &mut self,
-        private_key: &SecretKey,
-        tweak: &Option<Scalar>,
+        private_key: SecretKey,
+        tweak: Option<&Scalar>,
+        secp: &Secp256k1<All>,
     ) -> Result<(), UhpoError> {
         let prev_update_txout = self
             .prev_update_txout
@@ -69,7 +82,7 @@ impl PayoutUpdate {
             .ok_or(UhpoError::NoPrevUpdateTxOut)?;
         let prevouts = vec![&self.coinbase_txout, prev_update_txout];
 
-        add_signature(&mut self.transaction, 1, &prevouts, private_key, tweak)
+        add_signature(&mut self.transaction, 1, &prevouts, private_key, tweak , secp)
     }
 
     pub fn build(self) -> Transaction {
@@ -77,72 +90,24 @@ impl PayoutUpdate {
     }
 }
 
-fn build_transaction(
-    coinbase_tx: &Transaction,
-    prev_update_tx: Option<&Transaction>,
-    next_out_address: Address,
-    projected_fee: Amount,
-    coinbase_txout: &TxOut,
-    prev_update_txout: Option<&TxOut>,
-) -> Result<Transaction, Error> {
-    let mut total_amount = coinbase_txout.value;
-    if let Some(tx_out) = prev_update_txout {
-        total_amount += tx_out.value;
-    }
-
-    let mut payout_update_tx = Transaction {
-        version: Version::TWO,
-        lock_time: LockTime::ZERO,
-        input: vec![],
-        output: vec![],
-    };
-
-    payout_update_tx.input.push(TxIn {
-        previous_output: OutPoint {
-            txid: coinbase_tx.compute_txid(),
-            vout: 0,
-        },
-        script_sig: ScriptBuf::new(),
-        sequence: Sequence::MAX,
-        witness: Witness::default(),
-    });
-
-    if let Some(tx) = prev_update_tx {
-        payout_update_tx.input.push(TxIn {
-            previous_output: OutPoint {
-                txid: tx.compute_txid(),
-                vout: 0,
-            },
-            script_sig: ScriptBuf::new(),
-            sequence: Sequence::MAX,
-            witness: Witness::default(),
-        });
-    }
-
-    payout_update_tx.output.push(TxOut {
-        value: total_amount - projected_fee,
-        script_pubkey: next_out_address.script_pubkey(),
-    });
-
-    Ok(payout_update_tx)
-}
-
 fn add_signature(
     transaction: &mut Transaction,
     input_idx: usize,
     prevouts: &[&TxOut],
-    private_key: &SecretKey,
-    tweak: &Option<Scalar>,
+    private_key: SecretKey,
+    tweak: Option<&Scalar>,
+    secp: &Secp256k1<All>,
 ) -> Result<(), UhpoError> {
-    let secp = Secp256k1::new();
 
     let keypair: Keypair = match tweak {
-        Some(tweak) => private_key.keypair(&secp).add_xonly_tweak(&secp, tweak)?,
-        None => private_key.keypair(&secp),
+        Some(tweak) => private_key
+            .keypair(secp)
+            .add_xonly_tweak(secp, tweak)
+            .map_err(UhpoError::KeypairCreationError)?,
+        None => private_key.keypair(secp),
     };
 
     let mut sighash_cache = SighashCache::new(transaction.clone());
-
     let sighash = sighash_cache.taproot_key_spend_signature_hash(
         input_idx,
         &Prevouts::All(prevouts),
@@ -155,7 +120,8 @@ fn add_signature(
     let mut vec_sig = signature.serialize().to_vec();
     vec_sig.push(0x01);
 
-    secp.verify_schnorr(&signature, &message, &keypair.x_only_public_key().0)?;
+    secp.verify_schnorr(&signature, &message, &keypair.x_only_public_key().0)
+        .map_err(UhpoError::SignatureVerificationError)?;
 
     transaction.input[input_idx].witness.push(vec_sig);
 
@@ -165,12 +131,13 @@ fn add_signature(
 // unit tests
 #[cfg(test)]
 mod tests {
-    use bitcoin::{key::Keypair, secp256k1::All, Network};
+    use super::*;
+    use bitcoin::{
+        absolute::LockTime, key::Keypair, secp256k1::All, transaction::Version, Network, ScriptBuf,
+    };
     use rand::Rng;
 
-    use super::*;
-
-    fn setup() -> (Secp256k1<All>, Keypair, Address) {
+    pub fn setup() -> (Secp256k1<All>, Keypair, Address) {
         let secp = Secp256k1::new();
         let mut rng = rand::thread_rng();
 
@@ -181,6 +148,19 @@ mod tests {
             Address::p2tr(&secp, keypair.x_only_public_key().0, None, Network::Regtest);
 
         (secp, keypair, new_payout_address)
+    }
+
+    pub fn create_dummy_transaction() -> Transaction {
+        let tx = Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![],
+            output: vec![TxOut {
+                value: Amount::from_sat(50000000),
+                script_pubkey: ScriptBuf::new(),
+            }],
+        };
+        tx
     }
 
     #[test]
@@ -234,8 +214,8 @@ mod tests {
     }
 
     #[test]
-    fn test_add_signature() {
-        let (_, keypair, new_payout_address) = setup();
+    fn test_add_signature_with_no_tweak() {
+        let (secp, keypair, new_payout_address) = setup();
 
         let coinbase_tx = create_dummy_transaction();
         let prev_update_tx = create_dummy_transaction();
@@ -249,27 +229,54 @@ mod tests {
         .expect("Failed to create payout update");
 
         payout_update
-            .add_coinbase_sig(&keypair.secret_key(), &None)
+            .add_coinbase_sig(keypair.secret_key(), None , &secp)
             .expect("Failed to add coinbase signature");
 
         payout_update
-            .add_prev_update_sig(&keypair.secret_key(), &None)
+            .add_prev_update_sig(keypair.secret_key(), None , &secp)
             .expect("Failed to add prev update signature");
 
         assert_eq!(payout_update.transaction.input[0].witness.len(), 1);
         assert_eq!(payout_update.transaction.input[1].witness.len(), 1);
     }
 
-    fn create_dummy_transaction() -> Transaction {
-        let tx = Transaction {
-            version: Version::TWO,
-            lock_time: LockTime::ZERO,
-            input: vec![],
-            output: vec![TxOut {
-                value: Amount::from_sat(50000000),
-                script_pubkey: ScriptBuf::new(),
-            }],
-        };
-        tx
+    #[test]
+    fn test_add_signature_with_tweak() {
+        let (secp, keypair, new_payout_address) = setup();
+
+        let coinbase_tx = create_dummy_transaction();
+        let prev_update_tx = create_dummy_transaction();
+        let projected_fee = Amount::from_sat(1000);
+        let mut payout_update = PayoutUpdate::new(
+            Some(prev_update_tx),
+            coinbase_tx,
+            new_payout_address,
+            projected_fee,
+        )
+        .expect("Failed to create payout update");
+
+        payout_update
+            .add_coinbase_sig(
+                keypair.secret_key(),
+                Some(&Scalar::random_custom(&mut rand::thread_rng())),
+                &secp
+            )
+            .expect("Failed to add coinbase signature");
+
+        payout_update
+            .add_prev_update_sig(
+                keypair.secret_key(),
+                Some(&Scalar::random_custom(&mut rand::thread_rng())),
+                &secp
+            )
+            .expect("Failed to add prev update signature");
+
+        assert_eq!(payout_update.transaction.input[0].witness.len(), 1);
+        assert_eq!(payout_update.transaction.input[1].witness.len(), 1);
     }
+}
+
+#[cfg(test)]
+mod mock_tests {
+    // unimplemented
 }

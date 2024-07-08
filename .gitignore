@@ -15,4 +15,3 @@ proposal/proposal.bbl
 proposal/proposal.blg
 simulations/logs/*
 simulations/*.toolbox
-venv

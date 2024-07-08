@@ -3,10 +3,13 @@ use std::fmt::Error;
 use bitcoin::{
     hashes::Hash,
     key::{Keypair, Secp256k1},
-    secp256k1::{Message, Scalar, SecretKey , All},
+    secp256k1::{All, Message, Scalar, SecretKey, Verification},
     sighash::{Prevouts, SighashCache},
-    Address, Amount, TapSighashType, Transaction, TxOut,
+    Address, Amount, TapSighashType, Transaction, TxOut, XOnlyPublicKey,
 };
+use mockall::automock;
+use rand::{CryptoRng, Rng};
+use secp256k1::schnorr::Signature;
 
 use crate::{transaction::TransactionBuilder, UhpoError};
 
@@ -18,7 +21,6 @@ pub struct PayoutUpdate {
     coinbase_txout: TxOut,
     prev_update_txout: Option<TxOut>,
 }
-
 
 impl PayoutUpdate {
     pub fn new(
@@ -67,7 +69,14 @@ impl PayoutUpdate {
             None => vec![&self.coinbase_txout],
         };
 
-        add_signature(&mut self.transaction, 0, &prevouts, private_key, tweak , secp)
+        add_signature(
+            &mut self.transaction,
+            0,
+            &prevouts,
+            private_key,
+            tweak,
+            secp,
+        )
     }
 
     pub fn add_prev_update_sig(
@@ -82,7 +91,14 @@ impl PayoutUpdate {
             .ok_or(UhpoError::NoPrevUpdateTxOut)?;
         let prevouts = vec![&self.coinbase_txout, prev_update_txout];
 
-        add_signature(&mut self.transaction, 1, &prevouts, private_key, tweak , secp)
+        add_signature(
+            &mut self.transaction,
+            1,
+            &prevouts,
+            private_key,
+            tweak,
+            secp,
+        )
     }
 
     pub fn build(self) -> Transaction {
@@ -90,21 +106,97 @@ impl PayoutUpdate {
     }
 }
 
-fn add_signature(
+#[automock]
+pub trait SecretKeyBehavior<K: KeypairBehavior> {
+    fn keypair(&self, secp: &Secp256k1<All>) -> K;
+}
+
+impl SecretKeyBehavior<Keypair> for SecretKey {
+    fn keypair(&self, secp: &Secp256k1<All>) -> Keypair {
+        self.keypair(secp)
+    }
+}
+
+#[automock]
+pub trait KeypairBehavior {
+    fn add_xonly_tweak<C: Verification + 'static>(
+        self,
+        secp: &Secp256k1<C>,
+        tweak: &Scalar,
+    ) -> Result<Keypair, bitcoin::secp256k1::Error>;
+
+    fn to_keypair(&self) -> Keypair;
+}
+
+impl KeypairBehavior for Keypair {
+    fn add_xonly_tweak<C: Verification>(
+        self,
+        secp: &Secp256k1<C>,
+        tweak: &Scalar,
+    ) -> Result<Keypair, bitcoin::secp256k1::Error> {
+        self.add_xonly_tweak(secp, tweak)
+    }
+
+    fn to_keypair(&self) -> Keypair {
+        self.clone()
+    }
+}
+
+#[automock]
+pub trait Secp256k1Behavior {
+    fn sign_schnorr_with_rng<R: Rng + CryptoRng + 'static>(
+        &self,
+        msg: &Message,
+        keypair: &Keypair,
+        rng: &mut R,
+    ) -> Signature;
+
+    fn verify_schnorr(
+        &self,
+        signature: &Signature,
+        message: &Message,
+        pubkey: &XOnlyPublicKey,
+    ) -> Result<(), bitcoin::secp256k1::Error>;
+}
+
+impl Secp256k1Behavior for Secp256k1<All> {
+    fn sign_schnorr_with_rng<R: Rng + CryptoRng>(
+        &self,
+        msg: &Message,
+        keypair: &Keypair,
+        rng: &mut R,
+    ) -> Signature {
+        self.sign_schnorr_with_rng(msg, keypair, rng)
+    }
+
+    fn verify_schnorr(
+        &self,
+        signature: &Signature,
+        message: &Message,
+        pubkey: &XOnlyPublicKey,
+    ) -> Result<(), bitcoin::secp256k1::Error> {
+        self.verify_schnorr(signature, message, pubkey)
+    }
+}
+
+fn add_signature<S, K>(
     transaction: &mut Transaction,
     input_idx: usize,
     prevouts: &[&TxOut],
-    private_key: SecretKey,
+    private_key: S,
     tweak: Option<&Scalar>,
     secp: &Secp256k1<All>,
-) -> Result<(), UhpoError> {
-
+) -> Result<(), UhpoError>
+where
+    S: SecretKeyBehavior<K>,
+    K: KeypairBehavior,
+{
     let keypair: Keypair = match tweak {
         Some(tweak) => private_key
             .keypair(secp)
             .add_xonly_tweak(secp, tweak)
             .map_err(UhpoError::KeypairCreationError)?,
-        None => private_key.keypair(secp),
+        None => private_key.keypair(secp).to_keypair(),
     };
 
     let mut sighash_cache = SighashCache::new(transaction.clone());
@@ -151,7 +243,7 @@ mod tests {
     }
 
     pub fn create_dummy_transaction() -> Transaction {
-        let tx = Transaction {
+        Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
             input: vec![],
@@ -159,8 +251,7 @@ mod tests {
                 value: Amount::from_sat(50000000),
                 script_pubkey: ScriptBuf::new(),
             }],
-        };
-        tx
+        }
     }
 
     #[test]
@@ -229,11 +320,11 @@ mod tests {
         .expect("Failed to create payout update");
 
         payout_update
-            .add_coinbase_sig(keypair.secret_key(), None , &secp)
+            .add_coinbase_sig(keypair.secret_key(), None, &secp)
             .expect("Failed to add coinbase signature");
 
         payout_update
-            .add_prev_update_sig(keypair.secret_key(), None , &secp)
+            .add_prev_update_sig(keypair.secret_key(), None, &secp)
             .expect("Failed to add prev update signature");
 
         assert_eq!(payout_update.transaction.input[0].witness.len(), 1);
@@ -259,7 +350,7 @@ mod tests {
             .add_coinbase_sig(
                 keypair.secret_key(),
                 Some(&Scalar::random_custom(&mut rand::thread_rng())),
-                &secp
+                &secp,
             )
             .expect("Failed to add coinbase signature");
 
@@ -267,7 +358,7 @@ mod tests {
             .add_prev_update_sig(
                 keypair.secret_key(),
                 Some(&Scalar::random_custom(&mut rand::thread_rng())),
-                &secp
+                &secp,
             )
             .expect("Failed to add prev update signature");
 
@@ -278,5 +369,43 @@ mod tests {
 
 #[cfg(test)]
 mod mock_tests {
-    // unimplemented
+    use super::*;
+    use bitcoin::{ScriptBuf, TxIn};
+    use tests::create_dummy_transaction;
+
+    #[test]
+    fn test_add_signatures_key_creation_fails() {
+        let mut mock_secret_key = MockSecretKeyBehavior::<MockKeypairBehavior>::new();
+        let mut mock_keypair = MockKeypairBehavior::new();
+
+        mock_keypair
+            .expect_add_xonly_tweak()
+            .return_once(|_: &Secp256k1<All>, _| Err(secp256k1::Error::InvalidTweak));
+
+        mock_secret_key
+            .expect_keypair()
+            .return_once(move |_| mock_keypair);
+
+        let mut transaction = create_dummy_transaction();
+        transaction.input.push(TxIn {
+            ..Default::default()
+        });
+        let prevout = TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: ScriptBuf::new(),
+        };
+        let tweak = Some(Scalar::random_custom(&mut rand::thread_rng()));
+        let secp = Secp256k1::new();
+
+        let result = add_signature(
+            &mut transaction,
+            0,
+            &[&prevout],
+            mock_secret_key,
+            tweak.as_ref(),
+            &secp,
+        );
+
+        assert!(matches!(result, Err(UhpoError::KeypairCreationError(_))));
+    }
 }

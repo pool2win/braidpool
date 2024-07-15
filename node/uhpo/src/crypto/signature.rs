@@ -1,11 +1,13 @@
 use bitcoin::{
     hashes::Hash,
+    secp256k1::{All, Keypair, Message, Scalar, Secp256k1, SecretKey},
     sighash::{Prevouts, SighashCache},
     TapSighashType, Transaction, TxOut, XOnlyPublicKey,
 };
 use mockall::automock;
 use rand::{CryptoRng, Rng};
-use secp256k1::{schnorr::Signature, All, Keypair, Message, Scalar, Secp256k1, SecretKey};
+use secp256k1::schnorr::Signature;
+// use secp256k1::schnorr::Signature;
 
 use crate::UhpoError;
 
@@ -148,6 +150,7 @@ mod mock_tests {
 
     use bitcoin::{absolute::LockTime, transaction::Version, Amount, ScriptBuf, TxIn};
     use rand::rngs::ThreadRng;
+    use secp256k1::{Secp256k1, SecretKey};
 
     // dummy transaction for testing with no inputs
     pub fn create_dummy_transaction() -> Transaction {
@@ -163,7 +166,7 @@ mod mock_tests {
     }
 
     #[test]
-    fn test_add_signatures_key_creation_fails() {
+    fn test_add_signature_with_invalid_tweak_error_key_creation_should_fail() {
         // setup mocks
         let mock_secp = MockSecp256k1Behavior::new();
         let mut mock_keypair = MockKeypairBehavior::new();
@@ -205,7 +208,7 @@ mod mock_tests {
     }
 
     #[test]
-    fn test_add_signatures_signature_verification_fails() {
+    fn test_add_signature_with_a_bad_signature_should_fail_during_verification() {
         // setup
         // valid secp is used in order to generate valid keypair in add_signatures
         let real_secp = Secp256k1::new();
@@ -265,5 +268,31 @@ mod mock_tests {
             result,
             Err(UhpoError::SignatureVerificationError(_))
         ));
+    }
+
+    #[test]
+    fn test_add_signature_with_a_valid_signature_should_pass() {
+        // setup
+        let secp = Secp256k1::new();
+        let mut transaction = create_dummy_transaction();
+        transaction.input.push(TxIn {
+            ..Default::default()
+        });
+        let prevout = TxOut {
+            value: Amount::from_sat(0),
+            script_pubkey: ScriptBuf::new(),
+        };
+        let tweak = Some(Scalar::random_custom(&mut rand::thread_rng()));
+
+        let result = add_signature(
+            &mut transaction,
+            0,
+            &[&prevout],
+            SecretKey::from_slice(&rand::thread_rng().gen::<[u8; 32]>()).unwrap(),
+            tweak.as_ref(),
+            &secp,
+        );
+
+        assert!(result.is_ok());
     }
 }

@@ -1,12 +1,10 @@
 use std::fmt::Error;
 
-use bitcoin::{
-    key::Secp256k1,
-    secp256k1::{All, Scalar, SecretKey},
-    Address, Amount, Transaction, TxOut,
-};
+use bitcoin::{secp256k1::Scalar, Address, Amount, Transaction, TxOut};
 
-use crate::crypto::signature::add_signature;
+use crate::crypto::signature::{
+    add_signature, KeypairBehavior, Secp256k1Behavior, SecretKeyBehavior,
+};
 use crate::{transaction::TransactionBuilder, UhpoError};
 
 /// `PayoutUpdate` represents an update to a Eltoo style payout.
@@ -75,12 +73,17 @@ impl PayoutUpdate {
     ///
     /// # Returns
     /// Result indicating success or an UhpoError
-    pub fn add_coinbase_sig(
+    pub fn add_coinbase_sig<S, K, E>(
         &mut self,
-        private_key: SecretKey,
+        private_key: S,
         tweak: Option<&Scalar>,
-        secp: &Secp256k1<All>,
-    ) -> Result<(), UhpoError> {
+        secp: &E,
+    ) -> Result<(), UhpoError>
+    where
+        S: SecretKeyBehavior<K, E>,
+        K: KeypairBehavior<E>,
+        E: Secp256k1Behavior + 'static,
+    {
         let prevouts = match &self.prev_update_txout {
             Some(prev_update_txout) => vec![&self.coinbase_txout, prev_update_txout],
             None => vec![&self.coinbase_txout],
@@ -105,12 +108,17 @@ impl PayoutUpdate {
     ///
     /// # Returns
     /// Result indicating success or an UhpoError
-    pub fn add_prev_update_sig(
+    pub fn add_prev_update_sig<S, K, E>(
         &mut self,
-        private_key: SecretKey,
+        private_key: S,
         tweak: Option<&Scalar>,
-        secp: &Secp256k1<All>,
-    ) -> Result<(), UhpoError> {
+        secp: &E,
+    ) -> Result<(), UhpoError>
+    where
+        S: SecretKeyBehavior<K, E>,
+        K: KeypairBehavior<E>,
+        E: Secp256k1Behavior + 'static,
+    {
         let prev_update_txout = self
             .prev_update_txout
             .as_ref()
@@ -135,11 +143,16 @@ impl PayoutUpdate {
 // unit tests
 #[cfg(test)]
 mod tests {
+    use crate::crypto::signature::{
+        MockKeypairBehavior, MockSecp256k1Behavior, MockSecretKeyBehavior,
+    };
+
     use super::*;
     use bitcoin::{
         absolute::LockTime, key::Keypair, secp256k1::All, transaction::Version, Network, ScriptBuf,
     };
     use rand::Rng;
+    use secp256k1::{Secp256k1, SecretKey};
 
     // Helper function for setting up tests
 
@@ -278,5 +291,60 @@ mod tests {
 
         assert_eq!(payout_update.transaction.input[0].witness.len(), 1);
         assert_eq!(payout_update.transaction.input[1].witness.len(), 1);
+    }
+
+    #[test]
+    fn test_add_signature_mock_error_should_fail() {
+        let (_, _, new_payout_address) = setup();
+
+        let coinbase_tx = create_dummy_transaction();
+        let prev_update_tx = create_dummy_transaction();
+        let projected_fee = Amount::from_sat(1000);
+        let mut payout_update = PayoutUpdate::new(
+            Some(prev_update_tx),
+            coinbase_tx,
+            new_payout_address,
+            projected_fee,
+        )
+        .expect("Failed to create payout update");
+
+        // setup mocks
+        let mock_secp = MockSecp256k1Behavior::new();
+
+        let create_mock_secret_key = || {
+            let mut mock_keypair = MockKeypairBehavior::new();
+            let mut mock_secret_key = MockSecretKeyBehavior::<
+                MockKeypairBehavior<MockSecp256k1Behavior>,
+                MockSecp256k1Behavior,
+            >::new();
+
+            // add_xonly_tweak on keypair, returns an error
+            mock_keypair
+                .expect_add_xonly_tweak()
+                .return_once(|_: &MockSecp256k1Behavior, _| Err(secp256k1::Error::InvalidTweak));
+
+            // secretKey.keypair returns an MockKeypair
+            mock_secret_key
+                .expect_keypair()
+                .return_once(move |_| mock_keypair);
+
+            mock_secret_key
+        };
+
+        let result = payout_update.add_coinbase_sig(
+            create_mock_secret_key(),
+            Some(&Scalar::random_custom(&mut rand::thread_rng())),
+            &mock_secp,
+        );
+
+        assert!(matches!(result, Err(UhpoError::KeypairCreationError(_))));
+
+        let result = payout_update.add_prev_update_sig(
+            create_mock_secret_key(),
+            Some(&Scalar::random_custom(&mut rand::thread_rng())),
+            &mock_secp,
+        );
+
+        assert!(matches!(result, Err(UhpoError::KeypairCreationError(_))));
     }
 }

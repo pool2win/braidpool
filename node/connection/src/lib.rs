@@ -123,6 +123,7 @@ pub async fn start_listen(
             loop {
                 // Asynchronously wait for an inbound TcpStream.
                 log::info!("Starting accept");
+                notifier.notify_one();
                 match listener.accept().await {
                     Ok((stream, peer_address)) => {
                         log::info!("Accepted connection from {:?}", peer_address);
@@ -343,10 +344,7 @@ mod tests {
     use tokio_util::bytes::Bytes;
 
     #[tokio::test]
-    // TODO: This is a smoke test and we need to improve how we wait for listen to complete before we invoke connect.
     async fn it_should_run_connect_without_errors() {
-        use tokio::time::{sleep, Duration};
-
         let _ = env_logger::try_init();
 
         // listen and client are from different clients, and therefore we need two different connection managers.
@@ -358,28 +356,33 @@ mod tests {
 
         let (send_to_all_tx, send_to_all_rx) = broadcast::channel::<Bytes>(32);
 
+        let notify = Arc::new(Notify::new());
+        let notify_listen_cloned = notify.clone();
+        let notify_connect_cloned = notify.clone();
+
         tokio::spawn(async move {
             start_listen(
                 "localhost:6680".to_string(),
                 listen_manager_cloned,
                 32,
                 send_to_all_tx,
-                Arc::new(Notify::new()),
+                notify_listen_cloned,
             )
             .await;
         });
 
-        // TODO: Fix this smoke test! Kill the sleep in this smoke test.
-        sleep(Duration::from_millis(100)).await;
+        notify.notified().await;
 
         let _ = connect(
             "localhost:6680".to_string(),
             connect_manager_cloned,
             32,
             send_to_all_rx,
-            Arc::new(Notify::new()),
+            notify_connect_cloned,
         )
         .await;
+
+        notify.notified().await;
 
         assert_eq!(listen_manager.num_connections(), 1);
         assert_eq!(connect_manager.num_connections(), 1);
